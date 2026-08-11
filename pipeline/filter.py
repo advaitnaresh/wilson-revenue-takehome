@@ -8,6 +8,10 @@ Ambiguous cases are deliberately NOT dropped here — an order from an unknown
 customer, a refunded order, a discount bigger than the order — because dropping
 them would be a business decision disguised as data cleaning. Those are handled
 downstream in clean.py / transform.py, where the choice and its effect are visible.
+
+A table outside the known schema (config.KNOWN_TABLES) has no business-specific
+rules to apply, so it only gets the one filter that's safe regardless of what
+the CSV actually contains: dropping exact duplicate rows.
 """
 
 import pandas as pd
@@ -61,11 +65,24 @@ def filter_customers(customers: pd.DataFrame, filter_log: list[dict]) -> pd.Data
     return df.reset_index(drop=True)
 
 
+def filter_generic(df: pd.DataFrame, table: str, filter_log: list[dict]) -> pd.DataFrame:
+    before = len(df)
+    df = df.drop_duplicates()
+    _log(filter_log, table, "exact_duplicate_rows", before, len(df))
+    return df.reset_index(drop=True)
+
+
+KNOWN_FILTERS = {
+    "customers": filter_customers,
+    "orders": filter_orders,
+    "promotions": filter_promotions,
+}
+
+
 def apply_filters(tables: dict[str, pd.DataFrame]) -> tuple[dict[str, pd.DataFrame], list[dict]]:
     filter_log: list[dict] = []
-    filtered = {
-        "customers": filter_customers(tables["customers"], filter_log),
-        "orders": filter_orders(tables["orders"], filter_log),
-        "promotions": filter_promotions(tables["promotions"], filter_log),
-    }
+    filtered = {}
+    for name, df in tables.items():
+        fn = KNOWN_FILTERS.get(name)
+        filtered[name] = fn(df, filter_log) if fn else filter_generic(df, name, filter_log)
     return filtered, filter_log

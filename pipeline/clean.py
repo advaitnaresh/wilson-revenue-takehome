@@ -11,9 +11,15 @@ shape so the transform stage can join without surprises:
 
 Nothing here drops rows — row count in should equal row count out for every
 table except promotions, which intentionally collapses to order-grain.
+
+A table outside the known schema gets the generic treatment instead: trim
+whitespace, coerce whatever introspect.py sniffed as numeric/date-like — no
+business-specific reshaping, since that requires knowing what the table means.
 """
 
 import pandas as pd
+
+from . import introspect
 
 
 def clean_customers(customers: pd.DataFrame) -> pd.DataFrame:
@@ -57,9 +63,27 @@ def clean_promotions(promotions: pd.DataFrame) -> pd.DataFrame:
     return agg
 
 
+def clean_generic(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    for col in df.select_dtypes(include=["object", "str"]).columns:
+        df[col] = df[col].str.strip()
+    for col in introspect.infer_numeric_columns(df):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    for col in introspect.infer_date_columns(df):
+        df[col] = pd.to_datetime(df[col], errors="coerce", format="mixed")
+    return df
+
+
+KNOWN_CLEANERS = {
+    "customers": clean_customers,
+    "orders": clean_orders,
+    "promotions": clean_promotions,
+}
+
+
 def clean_all(tables: dict[str, pd.DataFrame]) -> dict[str, pd.DataFrame]:
-    return {
-        "customers": clean_customers(tables["customers"]),
-        "orders": clean_orders(tables["orders"]),
-        "promotions": clean_promotions(tables["promotions"]),
-    }
+    cleaned = {}
+    for name, df in tables.items():
+        fn = KNOWN_CLEANERS.get(name)
+        cleaned[name] = fn(df) if fn else clean_generic(df)
+    return cleaned

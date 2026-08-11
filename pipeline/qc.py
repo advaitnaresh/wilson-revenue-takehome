@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from . import config
+from . import config, introspect
 
 # "fail" = pipeline should not be trusted downstream of this until resolved.
 # "warn" = a real data-quality issue, but one with a defensible default handling.
@@ -80,16 +80,21 @@ def _duplicate_row_check(report: QCReport, stage: str, table: str, df: pd.DataFr
 
 def _duplicate_key_check(report: QCReport, stage: str, table: str, df: pd.DataFrame) -> None:
     key = config.PRIMARY_KEY.get(table)
+    inferred = key is None
+    if key is None:
+        key = introspect.infer_primary_key(df)
     if key is None or key not in df.columns:
         return
+
     dup_ids = df[key][df[key].duplicated()].unique()
     if len(dup_ids) == 0:
         return
     dup_rows = df[df[key].isin(dup_ids)]
     conflicting = int(dup_rows.groupby(key).nunique().gt(1).any(axis=1).sum())
+    label = f"(inferred key) {key}" if inferred else key
     report.add(
-        stage, table, f"duplicate_key:{key}", "warn", len(dup_ids),
-        f"{len(dup_ids)} duplicated {key}(s), {conflicting} group(s) with conflicting field values "
+        stage, table, f"duplicate_key:{key}", "warn" if not inferred else "info", len(dup_ids),
+        f"{len(dup_ids)} duplicated {label}(s), {conflicting} group(s) with conflicting field values "
         f"(non-conflicting duplicates are exact row repeats; conflicting ones need a human decision)",
     )
 
@@ -108,6 +113,28 @@ def _numeric_check(report: QCReport, stage: str, table: str, df: pd.DataFrame) -
         zero = int((parsed == 0).sum())
         if zero:
             report.add(stage, table, f"zero:{col}", "info", zero, f"{zero} zero value(s) in {table}.{col}")
+
+
+def _generic_numeric_date_check(report: QCReport, stage: str, table: str, df: pd.DataFrame) -> None:
+    """For tables with no declared schema: sniff columns that look numeric or
+    date-like, and flag the few values within them that don't fit — at 'info'
+    severity, since the type itself is a guess, not a contract."""
+    for col in introspect.infer_numeric_columns(df):
+        parsed = pd.to_numeric(df[col], errors="coerce")
+        unparseable = int(parsed.isna().sum() - df[col].isna().sum())
+        if unparseable:
+            report.add(
+                stage, table, f"unparseable:{col}", "info", unparseable,
+                f"(inferred numeric column) {unparseable} value(s) in {table}.{col} don't parse as numeric",
+            )
+    for col in introspect.infer_date_columns(df):
+        parsed = pd.to_datetime(df[col], errors="coerce", format="mixed")
+        unparseable = int(parsed.isna().sum() - df[col].isna().sum())
+        if unparseable:
+            report.add(
+                stage, table, f"unparseable:{col}", "info", unparseable,
+                f"(inferred date column) {unparseable} value(s) in {table}.{col} don't parse as a date",
+            )
 
 
 def _date_check(report: QCReport, stage: str, table: str, df: pd.DataFrame) -> None:
@@ -141,6 +168,26 @@ def _referential_integrity_check(report: QCReport, stage: str, tables: dict[str,
         if len(orphans):
             report.add(
                 stage, child, f"orphan_fk:{child_col}->{parent}.{parent_col}", "warn", len(orphans),
+                f"{len(orphans)} {child} row(s) reference a {parent_col} not present in {parent} "
+                f"({orphans[child_col].nunique()} distinct missing value(s))",
+            )
+
+
+def _inferred_referential_integrity_check(report: QCReport, stage: str, tables: dict[str, pd.DataFrame]) -> None:
+    """Same idea as _referential_integrity_check, but for relationships that
+    aren't declared in config.FOREIGN_KEYS — i.e. tables outside the known
+    schema. Detected by naming convention + uniqueness, not a contract, so
+    these are always 'info', never 'fail'."""
+    declared = {(c, cc) for c, cc, *_ in config.FOREIGN_KEYS}
+    for child, child_col, parent, parent_col in introspect.detect_foreign_keys(tables, exclude_tables=config.KNOWN_TABLES):
+        if (child, child_col) in declared:
+            continue
+        child_df, parent_df = tables[child], tables[parent]
+        orphans = child_df[~child_df[child_col].isin(parent_df[parent_col])]
+        if len(orphans):
+            report.add(
+                stage, child, f"orphan_fk:{child_col}->{parent}.{parent_col}", "info", len(orphans),
+                f"(inferred FK — declare it in config.py to make this authoritative) "
                 f"{len(orphans)} {child} row(s) reference a {parent_col} not present in {parent} "
                 f"({orphans[child_col].nunique()} distinct missing value(s))",
             )
@@ -193,8 +240,11 @@ def run_initial_qc(tables: dict[str, pd.DataFrame]) -> QCReport:
         _numeric_check(report, stage, name, df)
         _date_check(report, stage, name, df)
         _categorical_check(report, stage, name, df)
+        if name not in config.KNOWN_TABLES:
+            _generic_numeric_date_check(report, stage, name, df)
 
     _referential_integrity_check(report, stage, tables)
+    _inferred_referential_integrity_check(report, stage, tables)
     _promo_cardinality_check(report, stage, tables)
     _discount_exceeds_amount_check(report, stage, tables)
 

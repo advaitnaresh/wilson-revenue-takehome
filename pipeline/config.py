@@ -1,21 +1,37 @@
 """Schema and rule declarations for the pipeline.
 
-Kept separate from the stage logic so pointing this pipeline at a different
-extract of the same shape (new month, different source system) is a config
-edit, not a code change.
+Two layers, deliberately separate:
+
+1. Raw files are discovered automatically from `data/` — drop a new CSV in
+   there and it is picked up on the next run, named after its filename stem.
+   No code change needed to have it flow through ingest -> QC -> filter -> clean.
+
+2. A table declared below (customers/orders/promotions today) gets exact,
+   deterministic rules: typed columns, required-column checks, the revenue
+   transform. A table that shows up in data/ but isn't declared here still
+   gets profiled and cleaned — using the generic, type-sniffed rules in
+   introspect.py — it just doesn't feed the revenue calculation, since that
+   calculation is specific to this business schema, not a generic CSV concept.
+
+To onboard a new *known* table (e.g. a `returns.csv` you want capped-discount-style
+business rules for), add entries to REQUIRED_COLUMNS / PRIMARY_KEY / etc. below.
+To onboard a CSV you just want profiled and cleaned generically, do nothing —
+dropping the file into data/ is enough.
 """
 
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-
-RAW_FILES = {
-    "customers": REPO_ROOT / "customers.csv",
-    "orders": REPO_ROOT / "orders.csv",
-    "promotions": REPO_ROOT / "promotions.csv",
-}
-
+DATA_DIR = REPO_ROOT / "data"
 OUTPUT_DIR = REPO_ROOT / "pipeline_output"
+
+
+def discover_raw_files(data_dir: Path = DATA_DIR) -> dict[str, Path]:
+    """Every *.csv in data_dir becomes a table, named after its filename stem."""
+    return {p.stem: p for p in sorted(Path(data_dir).glob("*.csv"))}
+
+
+# --- Known-schema business rules --------------------------------------------
 
 # customer_id / order_id / promotion_id are identifiers, not quantities — read as
 # strings so a blank value can't get silently coerced into a float and lose precision.
@@ -58,12 +74,8 @@ FOREIGN_KEYS = [
 EXPECTED_STATUSES = {"completed", "refunded", "cancelled"}
 REVENUE_STATUSES = {"completed"}
 
-# Rows this dirty force a hard drop in the filter stage — kept to unambiguous,
-# unrecoverable cases. Anything ambiguous (unknown customer, non-completed status,
-# discount too large) is a business judgment call and is handled downstream,
-# in clean/transform, where it can be labeled and reported rather than deleted.
-HARD_DROP_RULES = {
-    "exact_duplicate_rows": True,
-    "unparseable_amount_or_date": True,
-    "non_positive_amount": True,
-}
+# The transform stage (revenue calc) only runs if every one of these is present
+# among the discovered tables. Extra, undeclared CSVs never block it.
+REVENUE_TABLES = {"customers", "orders", "promotions"}
+
+KNOWN_TABLES = set(REQUIRED_COLUMNS)

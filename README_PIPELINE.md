@@ -12,26 +12,49 @@ instead of once. The pipeline's job is narrower than the notebook's: catch and r
 *shape* of problem (duplicate rows, orphaned foreign keys, out-of-range values, fan-out joins),
 not necessarily re-derive every judgment call from scratch for data it's never seen.
 
+## Repository layout
+
+```
+data/                      raw CSVs — the data source. Drop a new file in here
+  customers.csv            and it's picked up on the next run, no code change.
+  orders.csv
+  promotions.csv
+pipeline/
+  config.py                schema declarations for known tables + auto-discovery
+  introspect.py             generic type/key/FK inference for undeclared tables
+  ingest.py … run.py        the seven stages
+pipeline_output/           generated artifacts (gitignored)
+tests/
+  test_pipeline.py          checks against the known customers/orders/promotions schema
+  test_generalization.py    checks that an undeclared CSV still flows through cleanly
+```
+
 ## Stages
 
 ```
-raw CSVs
+data/*.csv (however many)
    │
    ▼
-1. ingest      — read files as-is, enforce only that required columns exist
-   │
+1. ingest      — every CSV in data/ is discovered and read, keyed by filename stem;
+   │              "_id" columns are forced to string; a declared table also gets a
+   │              required-column check
    ▼
-2. QC (raw)    — profile the data: nulls, dupes, referential integrity, value ranges,
-   │              unexpected categories. Observes only — nothing is fixed yet.
+2. QC (raw)    — profile each table: nulls, dupes, referential integrity, value ranges,
+   │              unexpected categories. Observes only — nothing is fixed yet. A table
+   │              outside the known schema gets the same profile via type-sniffed,
+   │              best-effort rules instead of exact ones (see Generalizing, below)
    ▼
 3. filter      — drop rows only where there's no defensible way to keep them:
    │              exact duplicate rows, unparseable values, non-positive amounts
+   │              (an undeclared table only gets the always-safe one: exact dupes)
    ▼
 4. clean       — fix types, collapse promotions to one row per order *before* any join
    │              (so a 1:many relationship can't silently fan out a merge)
    ▼
 5. transform   — join, then derive the four requested metrics. Ambiguous cases
-   │              (unknown customer, discount > amount) are labeled here, not dropped
+   │              (unknown customer, discount > amount) are labeled here, not dropped.
+   │              Runs only if customers/orders/promotions are all present in data/ —
+   │              an extra, unrelated CSV never blocks it.
    ▼
 6. QC (final)  — validate the pipeline's own output: row counts reconcile, the join
    │              didn't fan out, discount capping actually held, segment revenue
@@ -77,14 +100,38 @@ spot-check, is what proves nothing was silently dropped between stages.
 
 ## Generalizing beyond this dataset
 
-The QC/filter rules are declared in `pipeline/config.py` (required columns, expected `status`
-values, numeric/date columns, foreign-key relationships) rather than hardcoded inline, so
-pointing this at a similarly-shaped extract — new month, different source system — is a config
-edit. `tests/test_pipeline.py` proves this: it runs the pipeline against small, hand-built
-DataFrames with injected errors (duplicate rows, a bad date, a negative amount, an orphaned
-customer_id, a discount exceeding its order, an unrecognized status, a naive join that fans out)
-rather than the real CSVs, to show each check catches a *class* of problem, not just the
-specific rows this one dataset happens to have.
+There are two levels of generalization here, and they're deliberately different in how much
+they trust the result:
+
+**A *declared* table** (customers/orders/promotions, in `pipeline/config.py`) gets exact,
+deterministic rules: typed columns, a required-column check, explicit foreign keys, the revenue
+transform. Pointing this at a similarly-shaped extract — new month, different source system — is
+a config edit: add the file's schema to `REQUIRED_COLUMNS` / `PRIMARY_KEY` / `NUMERIC_COLUMNS` /
+etc., and it gets the same treatment. `tests/test_pipeline.py` proves this against small,
+hand-built DataFrames with injected errors (duplicate rows, a bad date, a negative amount, an
+orphaned customer_id, a discount exceeding its order, an unrecognized status, a naive join that
+fans out), to show each check catches a *class* of problem, not just the specific rows this one
+dataset happens to have.
+
+**An *undeclared* table** — any CSV dropped into `data/` that isn't in config.py — still flows
+through ingest → QC → filter → clean automatically, using best-effort rules in
+`pipeline/introspect.py` instead of exact ones:
+
+- column types are *sniffed*: an object column where ≥90% of values parse as a number or date is
+  treated as numeric/date-like for validation purposes
+- a primary key is *guessed*: the most-unique `*_id` column, if one clears a 95% uniqueness bar
+- foreign keys are *inferred*: a `*_id` column is treated as a candidate reference into any other
+  table where that same column name looks like a key there too
+
+Every finding from an inferred rule is tagged `info` and its detail says "(inferred...)" —
+never `warn` or `fail` — because a guess about what a column *means* shouldn't be able to stop a
+pipeline run the way an actual schema violation can. `tests/test_generalization.py` proves this
+end-to-end: it builds a temp `data/` directory with the three known tables *plus* a new,
+never-declared `support_tickets.csv` (containing a duplicate row and a customer_id that doesn't
+exist in `customers.csv`), and asserts the pipeline profiles, filters, and cleans it correctly —
+without needing a single line added to `config.py` — while the revenue numbers stay exactly
+what they'd be without that file. Drop a real new CSV into `data/` and you get the same behavior
+these tests describe.
 
 ## What this pipeline does not decide for you
 
