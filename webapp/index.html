@@ -388,6 +388,40 @@
 
   .hidden { display: none !important; }
   [aria-live] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+  /* ============================== PRINT / PDF ============================== */
+  /* "Download QC report (PDF)" clones the already-rendered Report section into
+     #printView, then calls window.print() — the browser's own print-to-PDF is
+     the PDF engine, so nothing here has to hand-generate PDF bytes. On screen
+     #printView is always empty and hidden; @media print flips which half of
+     the page is visible. */
+  #printView { display: none; }
+  #printView .doc-title { font-size: 22px; margin-bottom: 2px; }
+  #printView .doc-meta { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
+
+  @media print {
+    /* Force the light palette regardless of the viewer's theme — printed
+       paper is white paper, not a screen the OS dark-mode setting applies to. */
+    :root, :root[data-theme="dark"], :root[data-theme="light"] {
+      --paper: #ffffff !important; --surface: #ffffff !important; --surface-2: #f5f5f5 !important;
+      --ink: #111111 !important; --ink-2: #333333 !important; --muted: #666666 !important;
+      --line: #cccccc !important; --line-strong: #999999 !important;
+      --accent: #0e7c86 !important; --accent-ink: #ffffff !important;
+      --good: #0a7a0a !important; --warning: #93600a !important; --critical: #a8241a !important; --info: #38449a !important;
+      --good-wash: #eaf6ea !important; --warning-wash: #fbf0dd !important; --critical-wash: #fbeceb !important; --info-wash: #eaecfa !important;
+      --series-enterprise: #2a78d6 !important; --series-smb: #d1591f !important; --series-midmarket: #128a63 !important; --series-unknown: #a6720a !important;
+      --shadow-card: none !important;
+    }
+    body > *:not(#printView) { display: none !important; }
+    #printView { display: block !important; }
+    body { background: #fff !important; }
+    .wrap { max-width: 100% !important; padding: 0 !important; }
+    section { padding: 0 !important; }
+    .panel, .health-panel { box-shadow: none !important; border: 1px solid var(--line-strong) !important; }
+    .issue, tr, .stat-tile, .bar-row { break-inside: avoid; page-break-inside: avoid; }
+    a { color: var(--ink) !important; text-decoration: none !important; }
+  }
+  @page { margin: 16mm 14mm; }
 </style>
 
 <header class="top">
@@ -565,6 +599,7 @@
       <div class="downloads" id="downloadsRow">
         <button class="btn btn-ghost btn-sm" id="downloadReportMd">Download QC report (.md)</button>
         <button class="btn btn-ghost btn-sm" id="downloadReportJson">Download QC report (.json)</button>
+        <button class="btn btn-ghost btn-sm" id="downloadReportPdf">Download QC report (.pdf)</button>
       </div>
     </div>
   </section>
@@ -576,6 +611,8 @@
     <div>Files are parsed and processed locally; nothing is uploaded anywhere.</div>
   </div>
 </footer>
+
+<div id="printView" aria-hidden="true"></div>
 
 <script>
 /* ======================================================================
@@ -37907,6 +37944,42 @@
   document.getElementById("downloadReportJson").addEventListener("click", () => {
     if (!lastResult) return;
     downloadBlob("qc_report.json", JSON.stringify(buildFullReport(lastResult), null, 2), "application/json");
+  });
+
+  // PDF: there's no PDF-writing code here — the browser's own print-to-PDF is
+  // the PDF engine. This clones the Report section exactly as already
+  // rendered on screen into #printView, strips the interactive-only bits
+  // (buttons, the chart/table toggle), forces the table view in place of the
+  // chart (background-color bars aren't reliable across print settings; a
+  // bordered table with the same numbers is), and calls window.print() —
+  // @media print (in the <style> block) hides everything else on the page.
+  function preparePrintView(result) {
+    const source = document.getElementById("resultsSection");
+    const clone = source.cloneNode(true);
+    clone.classList.remove("hidden");
+    clone.querySelectorAll("button, .downloads, .toggle-view").forEach((el) => el.remove());
+    const chart = clone.querySelector("#segmentChart");
+    const table = clone.querySelector("#segmentTable");
+    if (chart) chart.style.display = "none";
+    if (table) table.classList.remove("hidden");
+
+    const printView = document.getElementById("printView");
+    printView.innerHTML = "";
+    const title = document.createElement("div");
+    title.className = "doc-title";
+    title.textContent = "Pipeline QC Report";
+    const meta = document.createElement("div");
+    meta.className = "doc-meta";
+    meta.textContent = "Generated " + new Date().toLocaleString();
+    printView.appendChild(title);
+    printView.appendChild(meta);
+    printView.appendChild(clone);
+  }
+
+  document.getElementById("downloadReportPdf").addEventListener("click", () => {
+    if (!lastResult) return;
+    preparePrintView(lastResult);
+    window.print();
   });
 })();
 </script>

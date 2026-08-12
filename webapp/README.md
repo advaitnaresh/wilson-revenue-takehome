@@ -12,8 +12,8 @@ open the file and it works.
 1. Open `index.html` in a browser (double-click it, or `open webapp/index.html`).
 2. Provide a dataset, either:
    - drag/drop or browse to `.csv` files, or
-   - click one of the three **sample** buttons for an instant demo
-     (small datasets embedded directly in the page — see "Samples", below).
+   - click one of the four **sample** buttons for an instant demo
+     (see "Samples", below).
 3. Click **Run pipeline**. The diagram animates stage by stage; a manifest
    card unfolds under each stage as it completes. Below that, the Report
    section always shows three things regardless of what you uploaded — a
@@ -21,9 +21,11 @@ open the file and it works.
    language account of **what filtering, cleaning, and the join actually did**
    — and then either the revenue dashboard, a note that revenue needs all
    three known tables, or a **blocked** notice (see below).
-4. **Download QC report (.md / .json)** save all of the above — health,
-   comparison, change summary, and results if there are any — in one file,
-   readable or machine-parseable.
+4. **Download the QC report** as **.md** (readable), **.json** (parseable),
+   or **.pdf** — all three carry the same health/comparison/change-summary/
+   results content; the PDF button opens your browser's print dialog with
+   everything pre-formatted, so "Save as PDF" is one more click away (see
+   "About the PDF download," below, for why it works this way).
 
 Tables are matched by filename: `customers.csv` / `orders.csv` /
 `promotions.csv` get the exact, declared-schema treatment (typed columns,
@@ -110,6 +112,26 @@ run, which is true and useful information regardless of whether the final
 number is trustworthy. The `dirty_batch/` sample above is built specifically
 to demonstrate this path — everything else in the repo's sample data produces
 a full report.
+
+## About the PDF download
+
+There's no PDF-writing code in this page, and there's no bundled library
+either — both would either need a server or a CDN, and this is a
+self-contained, offline-capable page with a strict content-security policy
+that blocks exactly that. **Download QC report (.pdf)** instead clones the
+already-rendered Report section (the same DOM the health/comparison/change-
+summary panels are already sitting in, no separate report-building code to
+keep in sync), drops it into a normally-invisible container, and calls the
+browser's own `window.print()`. A print stylesheet hides everything else on
+the page and forces light, high-contrast colors regardless of your theme, so
+what shows up in the print dialog is just the report, formatted for paper.
+From there, "Save as PDF" (the default destination in most browsers) is what
+actually produces the file — this page hands off to the browser's print
+engine rather than reimplementing it. The segment-revenue bars are swapped
+for the plain data table for that render, specifically because whether a
+CSS background color survives to PDF depends on a "print background
+graphics" setting this page can't see or control; a bordered table with the
+same numbers doesn't have that problem.
 
 ## How this maps to the Python pipeline
 
