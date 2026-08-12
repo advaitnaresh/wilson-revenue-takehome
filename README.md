@@ -7,6 +7,11 @@ are split the way they are, why some findings are `fail` and others `info` —
 see [README_PIPELINE.md](README_PIPELINE.md). This doc is just the "how do I
 run it" reference.
 
+This pipeline (`pipeline/`, pandas) is sized for the sample `data/` — a few
+thousand rows in memory on one machine. For a dataset too large for that —
+millions of rows, arriving in batches — see [README_BIGDATA.md](README_BIGDATA.md)
+and `pipeline_spark/`, a PySpark port of the same seven stages.
+
 ## Setup
 
 ```bash

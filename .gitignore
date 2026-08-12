@@ -5,3 +5,7 @@ __pycache__/
 .DS_Store
 .pytest_cache/
 pipeline_output/
+pipeline_output_spark/
+spark-warehouse/
+metastore_db/
+derby.log
