@@ -338,8 +338,32 @@
   }
   .panel .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; flex-wrap: wrap; }
   .panel .panel-head h3 { font-size: 15px; }
+  .panel .panel-note { font-size: 12.5px; color: var(--muted); margin: -6px 0 14px; max-width: 68ch; line-height: 1.5; }
   .toggle-view { font-size: 12px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 5px 10px; cursor: pointer; }
   .toggle-view:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ---- data health ---- */
+  .health-row { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .health-pill {
+    flex: none; font-family: var(--font-mono); font-weight: 800; font-size: 13px; letter-spacing: 0.04em;
+    padding: 10px 18px; border-radius: 999px; text-transform: uppercase;
+  }
+  .health-stats { display: flex; gap: 28px; flex-wrap: wrap; }
+  .health-stat { font-size: 13px; }
+  .health-stat b { font-family: var(--font-mono); font-size: 16px; font-variant-numeric: tabular-nums; display: block; }
+  .health-stat .hs-label { color: var(--muted); font-size: 12px; display: block; margin-top: 1px; }
+
+  /* ---- QC comparison ---- */
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 18px; }
+  @media (max-width: 760px) { .compare-grid { grid-template-columns: 1fr; } }
+  .compare-col h4 { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; margin-bottom: 10px; }
+
+  /* ---- change summary ---- */
+  #changeSummaryBody h4 { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; margin: 16px 0 8px; }
+  #changeSummaryBody h4:first-child { margin-top: 0; }
+  #changeSummaryBody ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 5px; }
+  #changeSummaryBody li { font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }
+  #changeSummaryBody li b, #changeSummaryBody li .mono { color: var(--ink); }
 
   .bar-row { display: grid; grid-template-columns: 108px 1fr 128px; align-items: center; gap: 10px; padding: 7px 0; }
   .bar-row .seg-name { font-size: 13px; font-weight: 600; }
@@ -470,6 +494,23 @@
         <div class="step" id="reportSub"></div>
       </div>
 
+      <div class="panel health-panel" id="healthPanel"></div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>QC comparison — before vs after</h3></div>
+        <p class="panel-note">
+          Stage 2 profiles the raw data before anything is touched; Stage 6 validates the pipeline's own
+          output after filter → clean → transform have run. Comparing them shows what the pipeline actually
+          resolved versus what it only labeled and passed through.
+        </p>
+        <div id="qcComparisonBody"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>What the pipeline changed</h3></div>
+        <div id="changeSummaryBody"></div>
+      </div>
+
       <div id="noRevenueNote" class="panel hidden">
         <p style="color:var(--ink-2); font-size:14px;">
           No revenue report — that needs <span class="mono">customers</span>, <span class="mono">orders</span>
@@ -482,12 +523,14 @@
         <div style="display:flex; gap:12px; align-items:flex-start;">
           <span class="sev-badge sev-fail" style="margin-top:3px;">FAIL</span>
           <div>
-            <p style="font-weight:700; margin-bottom:4px;">Pipeline halted before producing a report.</p>
+            <p style="font-weight:700; margin-bottom:4px;">Pipeline halted before producing a revenue report.</p>
             <p style="color:var(--ink-2); font-size:13.5px;">
-              The final QC stage found at least one hard failure (see the Stage 6 card above) — the same
-              condition that makes <span class="mono">pipeline.run()</span> raise and exit non-zero in the
-              Python/Spark versions instead of writing output files. Numbers computed from a table that
-              failed validation aren't trustworthy, so this page withholds them rather than show them anyway.
+              The final QC stage found at least one hard failure (see the comparison above, or the Stage 6 card
+              higher up) — the same condition that makes <span class="mono">pipeline.run()</span> raise and exit
+              non-zero in the Python/Spark versions instead of writing output files. Revenue numbers computed from
+              a table that failed validation aren't trustworthy, so this page withholds them rather than show them
+              anyway. The health, comparison, and change summary above are unaffected — they describe what
+              happened, not the untrusted result.
             </p>
           </div>
         </div>
@@ -509,11 +552,11 @@
           <div class="panel-head"><h3>Top 5 customers by revenue</h3></div>
           <div class="scrollx" id="top5Table"></div>
         </div>
+      </div>
 
-        <div class="downloads">
-          <button class="btn btn-ghost btn-sm" id="downloadReport">Download QC report (.json)</button>
-          <button class="btn btn-ghost btn-sm" id="downloadResults">Download results (.json)</button>
-        </div>
+      <div class="downloads" id="downloadsRow">
+        <button class="btn btn-ghost btn-sm" id="downloadReportMd">Download QC report (.md)</button>
+        <button class="btn btn-ghost btn-sm" id="downloadReportJson">Download QC report (.json)</button>
       </div>
     </div>
   </section>
@@ -1359,26 +1402,233 @@
 
   let lastResult = null;
 
+  // ---------- data health ----------
+  function computeDataHealth(result) {
+    const initial = result.initialQC.issues;
+    const final = result.finalQC ? result.finalQC.issues : [];
+    const counts = { fail: 0, warn: 0, info: 0 };
+    initial.concat(final).forEach((i) => { counts[i.severity] = (counts[i.severity] || 0) + 1; });
+
+    let status, statusLabel;
+    if (result.blocked || counts.fail > 0) { status = "blocked"; statusLabel = "Blocked"; }
+    else if (counts.warn > 0) { status = "review"; statusLabel = "Needs review"; }
+    else if (counts.info > 0) { status = "review"; statusLabel = "Clean, with notes"; }
+    else { status = "healthy"; statusLabel = "Healthy"; }
+
+    const ingestRows = result.rowCountLedger.filter((r) => r.stage === "1_raw_ingestion");
+    const primaryTable = ingestRows.some((r) => r.table === "orders") ? "orders" : (ingestRows[0] ? ingestRows[0].table : null);
+    let ingestedCount = null, finalCount = null, retention = null;
+    if (primaryTable) {
+      ingestedCount = ingestRows.find((r) => r.table === primaryTable).count;
+      if (primaryTable === "orders" && result.analysisTable) {
+        finalCount = result.analysisTable.length;
+      } else {
+        const rowsForTable = result.rowCountLedger.filter((r) => r.table === primaryTable);
+        finalCount = rowsForTable.length ? rowsForTable[rowsForTable.length - 1].count : ingestedCount;
+      }
+      retention = ingestedCount ? (finalCount / ingestedCount) * 100 : null;
+    }
+    const totalDropped = result.filterLog.reduce((s, r) => s + r.rows_dropped, 0);
+
+    return { status, statusLabel, counts, primaryTable, ingestedCount, finalCount, retention, totalDropped };
+  }
+
+  function renderHealth(result) {
+    const h = computeDataHealth(result);
+    const pillClass = h.status === "healthy" ? "sev-pass" : h.status === "review" ? "sev-warn" : "sev-fail";
+    let stats = '<div class="health-stat"><b>' + h.counts.fail + " / " + h.counts.warn + " / " + h.counts.info +
+      '</b><span class="hs-label">fail / warn / info — initial + final QC combined</span></div>';
+    if (h.retention !== null) {
+      stats += '<div class="health-stat"><b>' + h.retention.toFixed(1) + '%</b><span class="hs-label">of ' + h.primaryTable + " rows reached the final table (" +
+        fmtInt(h.finalCount) + " / " + fmtInt(h.ingestedCount) + ')</span></div>';
+    }
+    stats += '<div class="health-stat"><b>' + fmtInt(h.totalDropped) + '</b><span class="hs-label">row(s) dropped by filtering</span></div>';
+    document.getElementById("healthPanel").innerHTML =
+      '<div class="health-row"><div class="health-pill ' + pillClass + '">' + h.statusLabel + '</div><div class="health-stats">' + stats + "</div></div>";
+  }
+
+  // ---------- QC comparison ----------
+  function countBySeverity(issues) {
+    const c = { fail: 0, warn: 0, info: 0 };
+    issues.forEach((i) => { c[i.severity] = (c[i.severity] || 0) + 1; });
+    return c;
+  }
+
+  function renderQCComparison(result) {
+    const initial = result.initialQC.issues;
+    const final = result.finalQC ? result.finalQC.issues : [];
+    const ic = countBySeverity(initial), fc = countBySeverity(final);
+    const table = '<table class="datatable"><thead><tr><th></th><th>Initial QC (raw data)</th><th>Final QC (pipeline output)</th></tr></thead><tbody>' +
+      "<tr><td>" + sevBadge("fail") + "</td><td class=\"num\">" + ic.fail + "</td><td class=\"num\">" + fc.fail + "</td></tr>" +
+      "<tr><td>" + sevBadge("warn") + "</td><td class=\"num\">" + ic.warn + "</td><td class=\"num\">" + fc.warn + "</td></tr>" +
+      "<tr><td>" + sevBadge("info") + "</td><td class=\"num\">" + ic.info + "</td><td class=\"num\">" + fc.info + "</td></tr>" +
+      "<tr><td><b>Total</b></td><td class=\"num\"><b>" + initial.length + "</b></td><td class=\"num\"><b>" + final.length + "</b></td></tr>" +
+      "</tbody></table>";
+    const cols = '<div class="compare-grid">' +
+      '<div class="compare-col"><h4>Before — raw data (Stage 2)</h4>' + renderIssueList(initial) + "</div>" +
+      '<div class="compare-col"><h4>After — pipeline output (Stage 6)</h4>' +
+      (result.finalQC ? renderIssueList(final) : '<div class="no-issues" style="color:var(--info)">Not run — revenue tables incomplete.</div>') + "</div>" +
+      "</div>";
+    document.getElementById("qcComparisonBody").innerHTML = table + cols;
+  }
+
+  // ---------- filter / clean / transform summary ----------
+  function buildFilterSummary(result) {
+    const byTable = {};
+    result.filterLog.forEach((r) => { (byTable[r.table] = byTable[r.table] || []).push(r); });
+    const items = Object.keys(byTable).map((table) => {
+      const rows = byTable[table];
+      const dropped = rows.reduce((s, r) => s + r.rows_dropped, 0);
+      if (dropped === 0) return "<span class=\"mono\">" + table + "</span>: no rows dropped — " + rows.map((r) => r.rule.replace(/_/g, " ")).join(", ") + " all passed.";
+      const parts = rows.filter((r) => r.rows_dropped > 0).map((r) => "<b>" + r.rows_dropped + "</b> for " + r.rule.replace(/_/g, " "));
+      return "<span class=\"mono\">" + table + "</span>: dropped <b>" + dropped + "</b> row(s) — " + parts.join(", ") + ".";
+    });
+    return items.length ? items : ["No tables were filtered."];
+  }
+
+  function buildCleanSummary(result) {
+    const cleaned = result.tables;
+    const items = [];
+    if (cleaned.customers) items.push("<span class=\"mono\">customers</span>: text fields trimmed (<b>" + fmtInt(cleaned.customers.records.length) + "</b> rows).");
+    if (cleaned.orders) items.push("<span class=\"mono\">orders</span>: <b>amount</b> cast to a number, <b>order_date</b> parsed as a date, status/customer_id trimmed (<b>" + fmtInt(cleaned.orders.records.length) + "</b> rows).");
+    if (cleaned.promotions) {
+      const rawRow = result.rowCountLedger.find((r) => r.stage === "1_raw_ingestion" && r.table === "promotions");
+      const stacked = cleaned.promotions.records.filter((r) => r.n_promos > 1).length;
+      items.push("<span class=\"mono\">promotions</span>: collapsed <b>" + (rawRow ? fmtInt(rawRow.count) : "?") + "</b> row(s) to <b>" + fmtInt(cleaned.promotions.records.length) +
+        "</b> order-level row(s)" + (stacked ? " (<b>" + stacked + "</b> order(s) had stacked promotions summed together)" : "") + ".");
+    }
+    Object.keys(cleaned).forEach((name) => {
+      if (KNOWN_TABLES_UI.has(name)) return;
+      items.push("<span class=\"mono\">" + name + "</span>: generic table — whitespace trimmed, inferred numeric/date columns coerced (<b>" + fmtInt(cleaned[name].records.length) + "</b> rows).");
+    });
+    return items.length ? items : ["No tables needed cleaning."];
+  }
+
+  function buildTransformSummary(result) {
+    if (!result.analysisTable) return ["Skipped — needs customers, orders, and promotions tables all present."];
+    const unknown = result.analysisTable.filter((r) => !r.is_known_customer).length;
+    const capped = result.analysisTable.filter((r) => r.discount_raw > r.amount).length;
+    const reduction = result.analysisTable.reduce((s, r) => s + (r.discount_raw - r.discount), 0);
+    return [
+      "<b>" + fmtInt(result.analysisTable.length) + "</b> order(s) joined to their customer and promotion records.",
+      unknown > 0
+        ? "<b>" + fmtInt(unknown) + "</b> order(s) referenced a customer_id not found in customers — kept in the total, labeled segment \"Unknown\"."
+        : "Every order's customer_id matched a known customer.",
+      capped > 0
+        ? "<b>" + fmtInt(capped) + "</b> order(s) had a discount larger than the order itself — capped at the order amount (reduced total discount by <b>" + fmtMoney(reduction) + "</b>)."
+        : "No discounts needed capping.",
+    ];
+  }
+  const KNOWN_TABLES_UI = new Set(["customers", "orders", "promotions"]);
+
+  function renderChangeSummary(result) {
+    document.getElementById("changeSummaryBody").innerHTML =
+      "<h4>Filtering</h4><ul>" + buildFilterSummary(result).map((t) => "<li>" + t + "</li>").join("") + "</ul>" +
+      "<h4>Cleaning</h4><ul>" + buildCleanSummary(result).map((t) => "<li>" + t + "</li>").join("") + "</ul>" +
+      "<h4>Transform</h4><ul>" + buildTransformSummary(result).map((t) => "<li>" + t + "</li>").join("") + "</ul>";
+  }
+
+  // ---------- full report (used by both downloads) ----------
+  function buildFullReport(result) {
+    const health = computeDataHealth(result);
+    return {
+      generated_at: new Date().toISOString(),
+      data_health: {
+        status: health.statusLabel,
+        issue_counts: health.counts,
+        row_retention_pct: health.retention,
+        primary_table: health.primaryTable,
+        rows_ingested: health.ingestedCount,
+        rows_in_final_table: health.finalCount,
+        rows_dropped_by_filtering: health.totalDropped,
+      },
+      qc_comparison: {
+        initial_qc_issues: result.initialQC.issues,
+        final_qc_issues: result.finalQC ? result.finalQC.issues : [],
+      },
+      pipeline_changes: {
+        filtering: buildFilterSummary(result).map(stripTags),
+        cleaning: buildCleanSummary(result).map(stripTags),
+        transform: buildTransformSummary(result).map(stripTags),
+      },
+      row_count_ledger: result.rowCountLedger,
+      filter_log: result.filterLog,
+      blocked: result.blocked,
+      results: result.blocked
+        ? null
+        : result.revenueSummary
+        ? { revenue_summary: result.revenueSummary, by_segment: result.bySegment, top5: result.top5 }
+        : null,
+    };
+  }
+  function stripTags(s) { return s.replace(/<[^>]+>/g, ""); }
+
+  function reportToMarkdown(report) {
+    let md = "# Pipeline QC report\n\n_Generated " + report.generated_at + "_\n\n";
+    md += "## Data health\n\n**Status: " + report.data_health.status + "**\n\n";
+    md += "- Issues: " + report.data_health.issue_counts.fail + " fail, " + report.data_health.issue_counts.warn + " warn, " + report.data_health.issue_counts.info + " info\n";
+    if (report.data_health.row_retention_pct !== null) {
+      md += "- Row retention (" + report.data_health.primary_table + "): " + report.data_health.row_retention_pct.toFixed(1) + "% (" + report.data_health.rows_in_final_table + " / " + report.data_health.rows_ingested + ")\n";
+    }
+    md += "- Rows dropped by filtering: " + report.data_health.rows_dropped_by_filtering + "\n\n";
+
+    md += "## QC comparison — before vs after\n\n| | Initial QC (raw data) | Final QC (pipeline output) |\n|---|---|---|\n";
+    const ic = countBySeverity(report.qc_comparison.initial_qc_issues), fc = countBySeverity(report.qc_comparison.final_qc_issues);
+    md += "| Fail | " + ic.fail + " | " + fc.fail + " |\n| Warn | " + ic.warn + " | " + fc.warn + " |\n| Info | " + ic.info + " | " + fc.info + " |\n\n";
+
+    md += "### Before — raw data\n\n" + (report.qc_comparison.initial_qc_issues.length
+      ? report.qc_comparison.initial_qc_issues.map((i) => "- **[" + i.severity.toUpperCase() + "]** " + i.table + " · " + i.check + " — " + i.detail).join("\n") + "\n\n"
+      : "_No issues found._\n\n");
+    md += "### After — pipeline output\n\n" + (report.qc_comparison.final_qc_issues.length
+      ? report.qc_comparison.final_qc_issues.map((i) => "- **[" + i.severity.toUpperCase() + "]** " + i.table + " · " + i.check + " — " + i.detail).join("\n") + "\n\n"
+      : "_No issues found._\n\n");
+
+    md += "## What the pipeline changed\n\n";
+    md += "### Filtering\n" + report.pipeline_changes.filtering.map((t) => "- " + t).join("\n") + "\n\n";
+    md += "### Cleaning\n" + report.pipeline_changes.cleaning.map((t) => "- " + t).join("\n") + "\n\n";
+    md += "### Transform\n" + report.pipeline_changes.transform.map((t) => "- " + t).join("\n") + "\n\n";
+
+    md += "## Results\n\n";
+    if (report.blocked) {
+      md += "**BLOCKED** — a hard failure in final QC means this run halts before producing a report, matching `pipeline.run()`'s `raise_if_failed()` gate.\n";
+    } else if (!report.results) {
+      md += "No revenue report — customers/orders/promotions weren't all present.\n";
+    } else {
+      const rs = report.results.revenue_summary;
+      md += "- Total revenue: " + fmtMoney(rs.total_revenue) + " (" + rs.completed_orders + " completed orders)\n";
+      md += "- Net revenue: " + fmtMoney(rs.net_revenue) + "\n- Total discounts: " + fmtMoney(rs.total_discount) + "\n\n";
+      md += "### Revenue by segment\n\n| Segment | Orders | Revenue | Discounts | Net revenue | % of total |\n|---|---|---|---|---|---|\n";
+      report.results.by_segment.forEach((s) => {
+        md += "| " + s.segment + " | " + s.orders + " | " + fmtMoney(s.revenue) + " | " + fmtMoney(s.discounts) + " | " + fmtMoney(s.net_revenue) + " | " + s.pct_of_revenue.toFixed(2) + "% |\n";
+      });
+      md += "\n### Top 5 customers\n\n| # | Customer | Segment | Region | Orders | Revenue | Net revenue |\n|---|---|---|---|---|---|---|\n";
+      report.results.top5.forEach((c, i) => {
+        md += "| " + (i + 1) + " | " + c.customer_name + " | " + c.segment + " | " + (c.region || "—") + " | " + c.orders + " | " + fmtMoney(c.revenue) + " | " + fmtMoney(c.net_revenue) + " |\n";
+      });
+    }
+    return md;
+  }
+
   function renderResults(result) {
     lastResult = result;
     const noNote = document.getElementById("noRevenueNote");
     const blockedNote = document.getElementById("blockedNote");
     const block = document.getElementById("revenueBlock");
-    const downloadReportBtn = document.getElementById("downloadReport");
-    const downloadResultsBtn = document.getElementById("downloadResults");
+
+    renderHealth(result);
+    renderQCComparison(result);
+    renderChangeSummary(result);
 
     if (result.blocked) {
       document.getElementById("reportSub").textContent = "HALTED";
       noNote.classList.add("hidden"); block.classList.add("hidden"); blockedNote.classList.remove("hidden");
-      downloadReportBtn.disabled = true; downloadResultsBtn.disabled = true;
       return;
     }
     blockedNote.classList.add("hidden");
-    downloadReportBtn.disabled = false;
 
     document.getElementById("reportSub").textContent = result.revenueSummary ? "REVENUE REPORT" : "DATA-QUALITY ONLY";
-    if (!result.revenueSummary) { noNote.classList.remove("hidden"); block.classList.add("hidden"); downloadResultsBtn.disabled = true; return; }
-    noNote.classList.add("hidden"); block.classList.remove("hidden"); downloadResultsBtn.disabled = false;
+    if (!result.revenueSummary) { noNote.classList.remove("hidden"); block.classList.add("hidden"); return; }
+    noNote.classList.add("hidden"); block.classList.remove("hidden");
 
     const rs = result.revenueSummary;
     const discountRate = rs.total_revenue ? (rs.total_discount / rs.total_revenue) * 100 : 0;
@@ -1425,29 +1675,20 @@
     document.getElementById("toggleChartView").textContent = showingChart ? "View as chart" : "View as table";
   });
 
-  function download(filename, dataObj) {
-    const blob = new Blob([JSON.stringify(dataObj, null, 2)], { type: "application/json" });
+  function downloadBlob(filename, content, mime) {
+    const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
   }
-  document.getElementById("downloadReport").addEventListener("click", () => {
-    if (!lastResult || lastResult.blocked) return;
-    download("qc_report.json", {
-      row_count_ledger: lastResult.rowCountLedger,
-      filter_log: lastResult.filterLog,
-      initial_qc_issues: lastResult.initialQC.issues,
-      final_qc_issues: lastResult.finalQC ? lastResult.finalQC.issues : [],
-    });
+  document.getElementById("downloadReportMd").addEventListener("click", () => {
+    if (!lastResult) return;
+    downloadBlob("qc_report.md", reportToMarkdown(buildFullReport(lastResult)), "text/markdown");
   });
-  document.getElementById("downloadResults").addEventListener("click", () => {
-    if (!lastResult || lastResult.blocked || !lastResult.revenueSummary) return;
-    download("results.json", {
-      revenue_summary: lastResult.revenueSummary,
-      by_segment: lastResult.bySegment,
-      top5: lastResult.top5,
-    });
+  document.getElementById("downloadReportJson").addEventListener("click", () => {
+    if (!lastResult) return;
+    downloadBlob("qc_report.json", JSON.stringify(buildFullReport(lastResult), null, 2), "application/json");
   });
 })();
 </script>
