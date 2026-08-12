@@ -23,9 +23,13 @@ open the file and it works.
    three known tables, or a **blocked** notice (see below).
 4. **Download the QC report** as **.md** (readable), **.json** (parseable),
    or **.pdf** — all three carry the same health/comparison/change-summary/
-   results content; the PDF button opens your browser's print dialog with
-   everything pre-formatted, so "Save as PDF" is one more click away (see
-   "About the PDF download," below, for why it works this way).
+   results content; the PDF button opens a new tab with everything
+   pre-formatted for printing, so "Save as PDF" is one more click away (see
+   "About the PDF download," below, for why it works this way). Every
+   download also opens an on-page panel with the same content and a copy
+   button — if a save dialog or new tab doesn't appear for you, that panel
+   is the fallback (see "If a download button doesn't seem to do anything,"
+   further down).
 
 Tables are matched by filename: `customers.csv` / `orders.csv` /
 `promotions.csv` get the exact, declared-schema treatment (typed columns,
@@ -121,17 +125,33 @@ self-contained, offline-capable page with a strict content-security policy
 that blocks exactly that. **Download QC report (.pdf)** instead clones the
 already-rendered Report section (the same DOM the health/comparison/change-
 summary panels are already sitting in, no separate report-building code to
-keep in sync), drops it into a normally-invisible container, and calls the
-browser's own `window.print()`. A print stylesheet hides everything else on
-the page and forces light, high-contrast colors regardless of your theme, so
-what shows up in the print dialog is just the report, formatted for paper.
-From there, "Save as PDF" (the default destination in most browsers) is what
-actually produces the file — this page hands off to the browser's print
-engine rather than reimplementing it. The segment-revenue bars are swapped
-for the plain data table for that render, specifically because whether a
-CSS background color survives to PDF depends on a "print background
-graphics" setting this page can't see or control; a bordered table with the
-same numbers doesn't have that problem.
+keep in sync) into a normally-invisible container, opens a new browser tab
+with that content and a print-only stylesheet (light, high-contrast colors
+regardless of your theme; the segment-revenue bars swapped for the plain
+data table, since whether a CSS background color survives to PDF depends on
+a "print background graphics" setting this page can't see or control — a
+bordered table with the same numbers doesn't have that problem), and calls
+that tab's own `print()`. From there, "Save as PDF" — the default
+destination in most browsers — is what actually produces the file; this
+page hands off to the browser's print engine rather than reimplementing one.
+
+If opening a new tab is blocked (some embeds disallow pop-ups), it falls
+back to printing the current page directly.
+
+## If a download button doesn't seem to do anything
+
+Some contexts a browser can run this page in — a sandboxed iframe without
+download permission, certain restricted embeds — silently swallow a
+triggered download or a print call: the click fires, nothing throws, and no
+file or dialog appears. There's no reliable way for the page to detect that
+happened, so every one of the three download buttons pairs its attempt with
+an always-shown fallback panel containing the same content and a **Copy to
+clipboard** button (for `.md`/`.json`; the PDF button's fallback is an
+instruction, since there's no meaningful plain-text form of a print job).
+If the save dialog or new tab you expected doesn't show up, that panel is
+where the report still is — copy it out, or (for the PDF case) open
+`webapp/index.html` directly in an ordinary, non-embedded browser tab, where
+none of this applies.
 
 ## How this maps to the Python pipeline
 

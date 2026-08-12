@@ -381,6 +381,13 @@
 
   .downloads { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
 
+  .preview-textarea {
+    width: 100%; font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
+    padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+    background: var(--surface-2); color: var(--ink); resize: vertical;
+  }
+  .preview-textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
   /* ============================== FOOTER ============================== */
   footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: 12.5px; }
   footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
@@ -600,6 +607,18 @@
         <button class="btn btn-ghost btn-sm" id="downloadReportMd">Download QC report (.md)</button>
         <button class="btn btn-ghost btn-sm" id="downloadReportJson">Download QC report (.json)</button>
         <button class="btn btn-ghost btn-sm" id="downloadReportPdf">Download QC report (.pdf)</button>
+      </div>
+
+      <div class="panel hidden" id="reportPreviewPanel">
+        <div class="panel-head">
+          <h3 id="reportPreviewTitle">Report text</h3>
+          <button class="toggle-view" id="closePreview">Close</button>
+        </div>
+        <p class="panel-note" id="reportPreviewNote"></p>
+        <textarea id="reportPreviewText" class="preview-textarea" readonly rows="14"></textarea>
+        <div class="downloads" id="copyPreviewRow" style="margin-top:10px;">
+          <button class="btn btn-ghost btn-sm" id="copyPreview">Copy to clipboard</button>
+        </div>
       </div>
     </div>
   </section>
@@ -37930,34 +37949,85 @@
     document.getElementById("toggleChartView").textContent = showingChart ? "View as chart" : "View as table";
   });
 
+  // Some embedding contexts (a sandboxed iframe without "allow-downloads",
+  // a local file:// view in a picky browser) silently swallow a triggered
+  // download — the click fires, no error is thrown, and no file appears.
+  // There's no reliable way to detect that from the page's side, so every
+  // download attempt is paired with an always-visible fallback: the same
+  // content in a copyable textarea. Belt and suspenders, not a guess about
+  // which one you'll need.
   function downloadBlob(filename, content, mime) {
     const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
+    a.href = url; a.download = filename; a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
+
+  function showReportPreview(title, note, text) {
+    document.getElementById("reportPreviewTitle").textContent = title;
+    document.getElementById("reportPreviewNote").textContent = note;
+    const ta = document.getElementById("reportPreviewText");
+    const copyRow = document.getElementById("copyPreviewRow");
+    if (text === null) {
+      ta.classList.add("hidden");
+      copyRow.classList.add("hidden");
+    } else {
+      ta.classList.remove("hidden");
+      copyRow.classList.remove("hidden");
+      ta.value = text;
+    }
+    const panel = document.getElementById("reportPreviewPanel");
+    panel.classList.remove("hidden");
+    panel.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  document.getElementById("closePreview").addEventListener("click", () => {
+    document.getElementById("reportPreviewPanel").classList.add("hidden");
+  });
+  document.getElementById("copyPreview").addEventListener("click", () => {
+    const ta = document.getElementById("reportPreviewText");
+    const btn = document.getElementById("copyPreview");
+    const done = () => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy to clipboard"; }, 1500); };
+    const failed = () => { btn.textContent = "Select the text above and copy manually"; };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ta.value).then(done, () => {
+        ta.select();
+        try { document.execCommand("copy") ? done() : failed(); } catch (e) { failed(); }
+      });
+    } else {
+      ta.select();
+      try { document.execCommand("copy") ? done() : failed(); } catch (e) { failed(); }
+    }
+  });
+
   document.getElementById("downloadReportMd").addEventListener("click", () => {
     if (!lastResult) return;
-    downloadBlob("qc_report.md", reportToMarkdown(buildFullReport(lastResult)), "text/markdown");
+    const text = reportToMarkdown(buildFullReport(lastResult));
+    downloadBlob("qc_report.md", text, "text/markdown");
+    showReportPreview("qc_report.md", "A save dialog should have opened just now. If it didn't — some embedded or sandboxed views block automatic downloads — copy the text below and save it yourself as qc_report.md.", text);
   });
   document.getElementById("downloadReportJson").addEventListener("click", () => {
     if (!lastResult) return;
-    downloadBlob("qc_report.json", JSON.stringify(buildFullReport(lastResult), null, 2), "application/json");
+    const text = JSON.stringify(buildFullReport(lastResult), null, 2);
+    downloadBlob("qc_report.json", text, "application/json");
+    showReportPreview("qc_report.json", "A save dialog should have opened just now. If it didn't, copy the text below and save it yourself as qc_report.json.", text);
   });
 
   // PDF: there's no PDF-writing code here — the browser's own print-to-PDF is
   // the PDF engine. This clones the Report section exactly as already
   // rendered on screen into #printView, strips the interactive-only bits
-  // (buttons, the chart/table toggle), forces the table view in place of the
-  // chart (background-color bars aren't reliable across print settings; a
-  // bordered table with the same numbers is), and calls window.print() —
+  // (buttons, the chart/table toggle, the preview panel), forces the table
+  // view in place of the chart (background-color bars aren't reliable across
+  // print settings; a bordered table with the same numbers is), and prints —
   // @media print (in the <style> block) hides everything else on the page.
   function preparePrintView(result) {
     const source = document.getElementById("resultsSection");
     const clone = source.cloneNode(true);
     clone.classList.remove("hidden");
-    clone.querySelectorAll("button, .downloads, .toggle-view").forEach((el) => el.remove());
+    clone.querySelectorAll("button, .downloads, .toggle-view, #reportPreviewPanel").forEach((el) => el.remove());
     const chart = clone.querySelector("#segmentChart");
     const table = clone.querySelector("#segmentTable");
     if (chart) chart.style.display = "none";
@@ -37979,7 +38049,34 @@
   document.getElementById("downloadReportPdf").addEventListener("click", () => {
     if (!lastResult) return;
     preparePrintView(lastResult);
-    window.print();
+
+    // A genuine new top-level tab (window.open) isn't nested inside whatever
+    // sandbox this page is running in, so it's the more likely of the two to
+    // actually be allowed to print. If popups are blocked, opened is
+    // null/undefined and this falls back to printing the current page.
+    let opened = null;
+    try { opened = window.open("", "_blank"); } catch (e) { opened = null; }
+    if (opened && opened.document) {
+      const styleTag = document.querySelector("style").outerHTML;
+      // #printView is display:none outside of @media print in the original
+      // page (it's an inert staging area there); in this new tab it's the
+      // *only* content, so force it visible on screen too — if print() below
+      // doesn't fire for any reason, there's still something to look at
+      // instead of a blank tab, and Ctrl/Cmd+P still works from here.
+      const forceVisible = "<style>#printView{display:block !important;}</style>";
+      opened.document.write("<!doctype html><html><head><title>Pipeline QC Report</title>" + styleTag + forceVisible + "</head><body>" + document.getElementById("printView").outerHTML + "</body></html>");
+      opened.document.close();
+      opened.focus();
+      setTimeout(() => { try { opened.print(); } catch (e) {} }, 300);
+    } else {
+      try { window.print(); } catch (e) {}
+    }
+
+    showReportPreview(
+      "PDF",
+      "A new tab (or the print dialog) should have opened just now — pick “Save as PDF” as the destination. If nothing appeared, this view is likely blocking pop-ups and printing; open webapp/index.html directly in an ordinary browser tab instead, or use the .md/.json download above and print that.",
+      null
+    );
   });
 })();
 </script>
