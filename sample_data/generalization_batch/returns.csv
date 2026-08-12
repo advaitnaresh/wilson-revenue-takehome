@@ -1,0 +1,5 @@
+return_id,order_id,reason,refund_amount
+r1,o2,damaged,70.00
+r1,o2,damaged,70.00
+r3,o9,wrong_item,112.00
+r4,o999,never_arrived,45.00

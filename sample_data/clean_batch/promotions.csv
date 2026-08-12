@@ -1,0 +1,10 @@
+promotion_id,order_id,promo_code,discount_amount
+p1,o3,SAVE10,8.00
+p2,o7,WELCOME15,11.50
+p3,o11,SAVE10,15.00
+p4,o15,WELCOME15,18.50
+p5,o19,SAVE10,22.00
+p6,o23,WELCOME15,25.50
+p7,o27,SAVE10,29.00
+p8,o31,WELCOME15,32.50
+p9,o35,SAVE10,36.00
