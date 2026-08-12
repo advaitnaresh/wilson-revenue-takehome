@@ -1,0 +1,1453 @@
+<title>Pipeline Inspector — watch a dataset go through data-quality inspection</title>
+<style>
+  /* ============================== TOKENS ============================== */
+  :root {
+    color-scheme: light;
+    --paper: #F2F4F6;
+    --surface: #FFFFFF;
+    --surface-2: #F7F8FA;
+    --ink: #12161D;
+    --ink-2: #4B5563;
+    --muted: #8993A3;
+    --line: #DCE1E7;
+    --line-strong: #C3CBD4;
+    --accent: #0E7C86;
+    --accent-ink: #FFFFFF;
+    --accent-wash: rgba(14, 124, 134, 0.10);
+
+    --good: #0A8F0A;
+    --warning: #A66A00;
+    --critical: #C4291A;
+    --info: #4A5CB5;
+    --good-wash: rgba(10, 143, 10, 0.12);
+    --warning-wash: rgba(166, 106, 0, 0.12);
+    --critical-wash: rgba(196, 41, 26, 0.10);
+    --info-wash: rgba(74, 92, 181, 0.10);
+
+    --series-enterprise: #2a78d6;
+    --series-smb: #eb6834;
+    --series-midmarket: #1baf7a;
+    --series-unknown: #c9880c;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+
+    --radius-sm: 3px;
+    --radius-md: 7px;
+    --shadow-card: 0 1px 2px rgba(18, 22, 29, 0.04), 0 8px 24px -12px rgba(18, 22, 29, 0.10);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --paper: #0B0E13;
+      --surface: #141922;
+      --surface-2: #1A2029;
+      --ink: #F3F5F7;
+      --ink-2: #B8C0CC;
+      --muted: #7C8797;
+      --line: #242C38;
+      --line-strong: #333D4B;
+      --accent: #3FB6C1;
+      --accent-ink: #06202A;
+      --accent-wash: rgba(63, 182, 193, 0.12);
+
+      --good: #3FCB3F;
+      --warning: #E0A722;
+      --critical: #F0594A;
+      --info: #8C9AE8;
+      --good-wash: rgba(63, 203, 63, 0.12);
+      --warning-wash: rgba(224, 167, 34, 0.14);
+      --critical-wash: rgba(240, 89, 74, 0.14);
+      --info-wash: rgba(140, 154, 232, 0.14);
+
+      --series-enterprise: #3987e5;
+      --series-smb: #d95926;
+      --series-midmarket: #199e70;
+      --series-unknown: #c98500;
+      --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #0B0E13;
+    --surface: #141922;
+    --surface-2: #1A2029;
+    --ink: #F3F5F7;
+    --ink-2: #B8C0CC;
+    --muted: #7C8797;
+    --line: #242C38;
+    --line-strong: #333D4B;
+    --accent: #3FB6C1;
+    --accent-ink: #06202A;
+    --accent-wash: rgba(63, 182, 193, 0.12);
+    --good: #3FCB3F;
+    --warning: #E0A722;
+    --critical: #F0594A;
+    --info: #8C9AE8;
+    --good-wash: rgba(63, 203, 63, 0.12);
+    --warning-wash: rgba(224, 167, 34, 0.14);
+    --critical-wash: rgba(240, 89, 74, 0.14);
+    --info-wash: rgba(140, 154, 232, 0.14);
+    --series-enterprise: #3987e5;
+    --series-smb: #d95926;
+    --series-midmarket: #199e70;
+    --series-unknown: #c98500;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+  }
+
+  /* ============================== BASE ============================== */
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 { margin: 0; text-wrap: balance; font-weight: 800; letter-spacing: -0.01em; }
+  p { margin: 0; }
+  button { font-family: inherit; }
+  a { color: var(--accent); }
+  ::selection { background: var(--accent-wash); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  .scrollx { overflow-x: auto; }
+
+  /* ============================== HEADER ============================== */
+  header.top {
+    border-bottom: 1px solid var(--line);
+    padding: 18px 0;
+  }
+  header.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .brand {
+    display: flex; align-items: baseline; gap: 8px;
+    font-family: var(--font-mono); font-weight: 700; font-size: 14px; letter-spacing: 0.02em;
+  }
+  .brand .dot { color: var(--accent); }
+  .top-note { color: var(--muted); font-size: 13px; }
+  .top-note strong { color: var(--ink-2); }
+
+  /* ============================== HERO ============================== */
+  .hero { padding: 56px 0 40px; }
+  .hero h1 {
+    font-size: clamp(30px, 4.4vw, 46px);
+    line-height: 1.08;
+    margin: 14px 0 14px;
+    max-width: 14ch;
+  }
+  .hero .lede {
+    max-width: 62ch;
+    color: var(--ink-2);
+    font-size: 17px;
+  }
+  .hero .lede b { color: var(--ink); }
+
+  /* ============================== DIAGRAM ============================== */
+  .diagram-shell {
+    margin-top: 40px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    padding: 20px 8px 6px;
+  }
+  .diagram-shell figcaption {
+    padding: 6px 20px 14px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  svg.pipeline { display: block; width: 100%; height: auto; min-width: 720px; }
+  .stage-node rect.card {
+    fill: var(--surface);
+    stroke: var(--line-strong);
+    stroke-width: 1.25;
+    transition: stroke 0.25s, fill 0.25s;
+  }
+  .stage-node text { fill: var(--ink); font-family: var(--font-sans); }
+  .stage-node .num { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+  .stage-node .label { font-size: 12.5px; font-weight: 700; letter-spacing: 0.01em; }
+  .stage-node .cap { fill: var(--ink-2); font-size: 10.5px; }
+  .pipe-line { stroke: var(--line-strong); stroke-width: 2; fill: none; }
+  .pipe-arrow { fill: var(--line-strong); }
+  .stage-node.active rect.card { stroke: var(--accent); stroke-width: 2; fill: var(--accent-wash); }
+  .stage-node.active .ring { opacity: 1; }
+  .ring { opacity: 0; transform-origin: center; animation: pulse 1.4s ease-out infinite; }
+  @keyframes pulse {
+    0% { r: 5; opacity: 0.55; }
+    100% { r: 15; opacity: 0; }
+  }
+  .stage-node.done .status-dot { opacity: 1; }
+  .status-dot { opacity: 0; transition: opacity 0.2s; }
+  @media (prefers-reduced-motion: reduce) {
+    .ring { animation: none; opacity: 0; }
+  }
+
+  /* ============================== SECTIONS ============================== */
+  section { padding: 44px 0; }
+  section.divider-top { border-top: 1px solid var(--line); }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+  .section-head h2 { font-size: 22px; }
+  .section-head .step { color: var(--muted); font-family: var(--font-mono); font-size: 13px; }
+
+  /* ============================== INTAKE ============================== */
+  .intake-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 760px) { .intake-grid { grid-template-columns: 1fr; } }
+
+  .dropzone {
+    border: 2px dashed var(--line-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    padding: 36px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .dropzone:hover, .dropzone:focus-visible { border-color: var(--accent); background: var(--accent-wash); }
+  .dropzone.drag { border-color: var(--accent); background: var(--accent-wash); }
+  .dropzone .icon { font-size: 26px; margin-bottom: 10px; }
+  .dropzone .primary { font-weight: 700; font-size: 15px; }
+  .dropzone .secondary { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .dropzone input[type="file"] { display: none; }
+
+  .samples-card {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    padding: 18px;
+  }
+  .samples-card h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 700; margin-bottom: 12px; }
+  .sample-btn {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 10px 12px; margin-bottom: 8px;
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    color: var(--ink); font-size: 13.5px; text-align: left; cursor: pointer;
+    transition: border-color 0.15s, transform 0.1s;
+  }
+  .sample-btn:hover { border-color: var(--accent); }
+  .sample-btn:active { transform: scale(0.99); }
+  .sample-btn .swatch { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .sample-btn .label { font-weight: 600; }
+  .sample-btn .desc { color: var(--muted); font-size: 12px; margin-left: auto; text-align: right; }
+
+  .manifest-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .chip {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 7px 10px; font-size: 12.5px;
+  }
+  .chip .name { font-family: var(--font-mono); font-weight: 600; }
+  .chip .tag { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .chip .tag.known { color: var(--accent); }
+  .chip button { border: none; background: none; color: var(--muted); cursor: pointer; font-size: 14px; line-height: 1; padding: 0 2px; }
+  .chip button:hover { color: var(--critical); }
+
+  .run-row { display: flex; align-items: center; gap: 16px; margin-top: 20px; flex-wrap: wrap; }
+  .btn {
+    font-family: var(--font-sans); font-weight: 700; font-size: 14.5px;
+    padding: 12px 22px; border-radius: var(--radius-sm); border: 1px solid transparent; cursor: pointer;
+    transition: filter 0.15s, transform 0.08s;
+  }
+  .btn:active { transform: scale(0.98); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn-ghost { background: transparent; color: var(--ink-2); border-color: var(--line-strong); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { padding: 8px 14px; font-size: 13px; }
+  .check-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  .check-row input { accent-color: var(--accent); }
+
+  .error-banner {
+    margin-top: 16px; padding: 12px 14px; border-radius: var(--radius-sm);
+    background: var(--critical-wash); border: 1px solid var(--critical); color: var(--critical);
+    font-size: 13.5px; display: none;
+  }
+
+  /* ============================== STAGE CARDS ============================== */
+  .stage-cards { display: flex; flex-direction: column; gap: 12px; }
+  .stage-card {
+    border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface);
+    padding: 18px 20px; opacity: 0; transform: translateY(6px);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+    box-shadow: var(--shadow-card);
+  }
+  .stage-card.show { opacity: 1; transform: translateY(0); }
+  .stage-card .head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+  .stage-card .head .n { font-family: var(--font-mono); color: var(--muted); font-size: 12.5px; }
+  .stage-card .head h4 { font-size: 15.5px; }
+  .stage-card .head .outcome { margin-left: auto; }
+  .stage-card .desc { color: var(--ink-2); font-size: 13.5px; margin-bottom: 12px; }
+
+  .kv-row { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-bottom: 4px; }
+  .kv { font-size: 12.5px; color: var(--ink-2); }
+  .kv b { font-family: var(--font-mono); color: var(--ink); font-weight: 700; }
+
+  table.ledger { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
+  table.ledger th, table.ledger td { text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--line); }
+  table.ledger th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.04em; }
+  table.ledger td.num { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+  table.ledger tr:last-child td { border-bottom: none; }
+
+  .issue-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+  .issue {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--line);
+    background: var(--surface-2); font-size: 12.5px;
+  }
+  .sev-badge {
+    flex: none; font-family: var(--font-mono); font-size: 10px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 999px;
+    margin-top: 1px;
+  }
+  .sev-fail { background: var(--critical-wash); color: var(--critical); }
+  .sev-warn { background: var(--warning-wash); color: var(--warning); }
+  .sev-info { background: var(--info-wash); color: var(--info); }
+  .sev-pass { background: var(--good-wash); color: var(--good); }
+  .issue .msg .table-name { font-family: var(--font-mono); color: var(--ink); font-weight: 600; }
+  .issue .msg .check-name { color: var(--muted); }
+  .no-issues { color: var(--good); font-size: 13px; display: flex; align-items: center; gap: 8px; }
+
+  /* ============================== RESULTS ============================== */
+  .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
+  @media (max-width: 760px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+  .stat-tile {
+    border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface);
+    padding: 16px 18px; box-shadow: var(--shadow-card);
+  }
+  .stat-tile .label { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
+  .stat-tile .value { font-family: var(--font-mono); font-size: clamp(18px, 2.4vw, 25px); font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .stat-tile .sub { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+
+  .panel {
+    border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface);
+    padding: 20px; box-shadow: var(--shadow-card); margin-bottom: 20px;
+  }
+  .panel .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; flex-wrap: wrap; }
+  .panel .panel-head h3 { font-size: 15px; }
+  .toggle-view { font-size: 12px; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 5px 10px; cursor: pointer; }
+  .toggle-view:hover { border-color: var(--accent); color: var(--accent); }
+
+  .bar-row { display: grid; grid-template-columns: 108px 1fr 128px; align-items: center; gap: 10px; padding: 7px 0; }
+  .bar-row .seg-name { font-size: 13px; font-weight: 600; }
+  .bar-track { position: relative; height: 20px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
+  .bar-fill { position: absolute; left: 0; top: 0; height: 100%; border-radius: 3px; transition: width 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .bar-row .bar-val { font-family: var(--font-mono); font-size: 12.5px; text-align: right; font-variant-numeric: tabular-nums; }
+  .bar-row .bar-val .pct { color: var(--muted); font-size: 11px; }
+
+  table.datatable { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.datatable th, table.datatable td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  table.datatable th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.04em; }
+  table.datatable td.num { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+  table.datatable tbody tr:hover { background: var(--surface-2); }
+  table.datatable .rank { color: var(--muted); font-family: var(--font-mono); }
+
+  .downloads { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+
+  /* ============================== FOOTER ============================== */
+  footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: 12.5px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  footer a { color: var(--ink-2); text-decoration: underline; }
+
+  .hidden { display: none !important; }
+  [aria-live] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brand"><span class="dot">▣</span> PIPELINE&nbsp;INSPECTOR</div>
+    <div class="top-note">Runs entirely in <strong>your browser</strong> — no file ever leaves this page.</div>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <div class="eyebrow">Data-quality pipeline · live run</div>
+      <h1>Drop in a dataset.<br>Watch it go through inspection.</h1>
+      <p class="lede">
+        The same seven-stage pipeline built for a revenue take-home — <b>ingest, profile,
+        filter, clean, join, validate, report</b> — running live on whatever CSVs you give it.
+        Upload your own tables below, or load a sample to see it catch something.
+      </p>
+
+      <figure class="diagram-shell scrollx">
+        <svg class="pipeline" viewBox="0 0 1180 190" role="img" aria-label="Seven pipeline stages in sequence: Ingest, QC Raw, Filter, Clean, Transform, QC Final, Results, each connected by an arrow showing the order data moves through.">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 Z" class="pipe-arrow"></path>
+            </marker>
+          </defs>
+          <!-- connecting spine -->
+          <line x1="70" y1="95" x2="1110" y2="95" class="pipe-line"></line>
+          <g id="stage-nodes"></g>
+        </svg>
+        <figcaption>
+          Data flows left to right through seven stages; the filled dot under a stage marks its worst finding once it has run (grey = not yet run, green = clean, amber = warning, red = hard failure).
+        </figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="divider-top" id="intake">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Provide a dataset</h2>
+        <div class="step">STEP 1 / 2</div>
+      </div>
+
+      <div class="intake-grid">
+        <div>
+          <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload CSV files">
+            <div class="icon">⤒</div>
+            <div class="primary">Drop CSV files here, or click to browse</div>
+            <div class="secondary">customers.csv · orders.csv · promotions.csv — or any other CSV; unrecognized tables are still profiled and cleaned generically.</div>
+            <input type="file" id="fileInput" multiple accept=".csv,text/csv">
+          </div>
+          <div class="manifest-chips" id="manifestChips"></div>
+          <div class="error-banner" id="errorBanner"></div>
+
+          <div class="run-row">
+            <button class="btn btn-primary" id="runBtn" disabled>Run pipeline →</button>
+            <button class="btn btn-ghost btn-sm" id="clearBtn">Clear</button>
+            <label class="check-row"><input type="checkbox" id="skipAnim"> Skip animation</label>
+          </div>
+        </div>
+
+        <div class="samples-card">
+          <h3>Or load a sample</h3>
+          <button class="sample-btn" data-sample="clean">
+            <span class="swatch" style="background:var(--good)"></span>
+            <span class="label">Clean batch</span>
+            <span class="desc">20 orders, no issues</span>
+          </button>
+          <button class="sample-btn" data-sample="dirty">
+            <span class="swatch" style="background:var(--critical)"></span>
+            <span class="label">Dirty batch</span>
+            <span class="desc">duplicates, orphans, bad dates</span>
+          </button>
+          <button class="sample-btn" data-sample="generalization">
+            <span class="swatch" style="background:var(--info)"></span>
+            <span class="label">Unknown table</span>
+            <span class="desc">an undeclared CSV mixed in</span>
+          </button>
+          <p style="font-size:12px; color:var(--muted); margin-top:10px; line-height:1.5;">
+            Bigger, downloadable versions of these — plus the full 30k-row source dataset — are in
+            <span class="mono">sample_data/</span> in the repo. See the README for what each one is designed to trigger.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="divider-top hidden" id="manifestSection" aria-live="polite">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Run manifest</h2>
+        <div class="step">STEP 2 / 2</div>
+      </div>
+      <div class="stage-cards" id="stageCards"></div>
+    </div>
+  </section>
+
+  <section class="divider-top hidden" id="resultsSection">
+    <div class="wrap">
+      <div class="section-head">
+        <h2>Report</h2>
+        <div class="step" id="reportSub"></div>
+      </div>
+
+      <div id="noRevenueNote" class="panel hidden">
+        <p style="color:var(--ink-2); font-size:14px;">
+          No revenue report — that needs <span class="mono">customers</span>, <span class="mono">orders</span>
+          and <span class="mono">promotions</span> tables all present. The stages above still ran, and profiled/cleaned
+          whatever you uploaded.
+        </p>
+      </div>
+
+      <div id="blockedNote" class="panel hidden" style="border-color:var(--critical);">
+        <div style="display:flex; gap:12px; align-items:flex-start;">
+          <span class="sev-badge sev-fail" style="margin-top:3px;">FAIL</span>
+          <div>
+            <p style="font-weight:700; margin-bottom:4px;">Pipeline halted before producing a report.</p>
+            <p style="color:var(--ink-2); font-size:13.5px;">
+              The final QC stage found at least one hard failure (see the Stage 6 card above) — the same
+              condition that makes <span class="mono">pipeline.run()</span> raise and exit non-zero in the
+              Python/Spark versions instead of writing output files. Numbers computed from a table that
+              failed validation aren't trustworthy, so this page withholds them rather than show them anyway.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div id="revenueBlock" class="hidden">
+        <div class="stat-grid" id="statGrid"></div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Revenue by segment</h3>
+            <button class="toggle-view" id="toggleChartView">View as table</button>
+          </div>
+          <div id="segmentChart"></div>
+          <div id="segmentTable" class="hidden scrollx"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h3>Top 5 customers by revenue</h3></div>
+          <div class="scrollx" id="top5Table"></div>
+        </div>
+
+        <div class="downloads">
+          <button class="btn btn-ghost btn-sm" id="downloadReport">Download QC report (.json)</button>
+          <button class="btn btn-ghost btn-sm" id="downloadResults">Download results (.json)</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>Pipeline Inspector — a visual front end for the data-quality pipeline in this repo's <span class="mono">pipeline/</span> package. See <a href="README.md">README.md</a> for how the two stay in sync.</div>
+    <div>Files are parsed and processed locally; nothing is uploaded anywhere.</div>
+  </div>
+</footer>
+
+<script>
+/* ======================================================================
+   PIPELINE ENGINE — a JS port of pipeline/*.py. Same 7 stages, same
+   severity model (fail/warn/info). See README.md for the mapping between
+   this file's functions and the Python modules they mirror.
+   ====================================================================== */
+(function () {
+  "use strict";
+
+  function parseCSV(text) {
+    const rows = [];
+    let row = [], field = "", inQuotes = false, i = 0;
+    const n = text.length;
+    while (i < n) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        field += c; i++; continue;
+      }
+      if (c === '"') { inQuotes = true; i++; continue; }
+      if (c === ",") { row.push(field); field = ""; i++; continue; }
+      if (c === "\r") { i++; continue; }
+      if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
+      field += c; i++;
+    }
+    if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+    while (rows.length && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === "") rows.pop();
+    if (rows.length === 0) return { columns: [], records: [] };
+    const columns = rows[0].map((c) => c.trim());
+    const records = rows.slice(1).map((r) => {
+      const rec = {};
+      columns.forEach((col, idx) => { rec[col] = r[idx] === undefined ? "" : r[idx]; });
+      return rec;
+    });
+    return { columns, records };
+  }
+
+  const REQUIRED_COLUMNS = {
+    customers: ["customer_id", "customer_name", "segment", "region"],
+    orders: ["order_id", "customer_id", "order_date", "amount", "status"],
+    promotions: ["promotion_id", "order_id", "promo_code", "discount_amount"],
+  };
+  const PRIMARY_KEY = { customers: "customer_id", orders: "order_id", promotions: "promotion_id" };
+  const NUMERIC_COLUMNS = { orders: ["amount"], promotions: ["discount_amount"] };
+  const DATE_COLUMNS = { orders: ["order_date"] };
+  const FOREIGN_KEYS = [
+    ["orders", "customer_id", "customers", "customer_id"],
+    ["promotions", "order_id", "orders", "order_id"],
+  ];
+  const EXPECTED_STATUSES = new Set(["completed", "refunded", "cancelled"]);
+  const REVENUE_STATUSES = new Set(["completed"]);
+  const REVENUE_TABLES = new Set(["customers", "orders", "promotions"]);
+  const KNOWN_TABLES = new Set(Object.keys(REQUIRED_COLUMNS));
+
+  function isBlank(v) { return v === undefined || v === null || v === ""; }
+
+  function inferNumericColumns(records, columns, threshold) {
+    threshold = threshold || 0.9;
+    const out = [];
+    for (const col of columns) {
+      const vals = records.map((r) => r[col]).filter((v) => !isBlank(v));
+      if (!vals.length) continue;
+      const parsed = vals.filter((v) => !Number.isNaN(Number(v)));
+      if (parsed.length / vals.length >= threshold) out.push(col);
+    }
+    return out;
+  }
+  function parseDateLoose(v) { const t = Date.parse(v); return Number.isNaN(t) ? null : t; }
+  function inferDateColumns(records, columns, threshold) {
+    threshold = threshold || 0.9;
+    const out = [];
+    for (const col of columns) {
+      const vals = records.map((r) => r[col]).filter((v) => !isBlank(v));
+      if (!vals.length) continue;
+      const parsed = vals.filter((v) => parseDateLoose(v) !== null);
+      if (parsed.length / vals.length >= threshold) out.push(col);
+    }
+    return out;
+  }
+  function inferPrimaryKey(records, columns, threshold) {
+    threshold = threshold || 0.95;
+    let best = null, bestRatio = 0;
+    for (const col of columns) {
+      if (!col.endsWith("_id")) continue;
+      const vals = records.map((r) => r[col]).filter((v) => !isBlank(v));
+      if (!vals.length) continue;
+      const ratio = new Set(vals).size / vals.length;
+      if (ratio > bestRatio) { best = col; bestRatio = ratio; }
+    }
+    return bestRatio >= threshold ? best : null;
+  }
+
+  function makeReport() { return { issues: [] }; }
+  function addIssue(report, stage, table, check, severity, count, detail) {
+    report.issues.push({ stage, table, check, severity, count, detail });
+  }
+  function failures(report) { return report.issues.filter((i) => i.severity === "fail"); }
+
+  function ingest(files) {
+    const raw = {};
+    for (const f of files) {
+      const name = f.name.replace(/\.csv$/i, "").toLowerCase();
+      const { columns, records } = parseCSV(f.text);
+      if (KNOWN_TABLES.has(name)) {
+        const missing = REQUIRED_COLUMNS[name].filter((c) => !columns.includes(c));
+        if (missing.length) throw new Error(name + ": missing required column(s) " + missing.join(", "));
+      }
+      raw[name] = { columns, records };
+    }
+    return raw;
+  }
+
+  function runInitialQC(tables) {
+    const report = makeReport();
+    const stage = "initial_qc";
+
+    for (const name of Object.keys(tables)) {
+      const { columns, records } = tables[name];
+      for (const col of columns) {
+        const nNull = records.filter((r) => isBlank(r[col])).length;
+        if (nNull > 0) addIssue(report, stage, name, "null:" + col, "warn", nNull, nNull + " null value(s) in " + name + "." + col);
+      }
+      const seen = new Map();
+      let dupRows = 0;
+      for (const r of records) { const key = columns.map((c) => r[c]).join(""); seen.set(key, (seen.get(key) || 0) + 1); }
+      for (const c of seen.values()) if (c > 1) dupRows += c - 1;
+      if (dupRows > 0) addIssue(report, stage, name, "duplicate_rows", "warn", dupRows, dupRows + " fully duplicated row(s) in " + name);
+
+      const declaredKey = PRIMARY_KEY[name];
+      const inferred = !declaredKey;
+      const key = declaredKey || inferPrimaryKey(records, columns);
+      if (key && columns.includes(key)) {
+        const counts = new Map();
+        for (const r of records) { if (isBlank(r[key])) continue; counts.set(r[key], (counts.get(r[key]) || 0) + 1); }
+        const dupKeys = [...counts.values()].filter((c) => c > 1).length;
+        if (dupKeys > 0) {
+          const label = inferred ? "(inferred key) " + key : key;
+          addIssue(report, stage, name, "duplicate_key:" + key, inferred ? "info" : "warn", dupKeys, dupKeys + " duplicated " + label + "(s)");
+        }
+      }
+
+      if (KNOWN_TABLES.has(name)) {
+        for (const col of NUMERIC_COLUMNS[name] || []) {
+          if (!columns.includes(col)) continue;
+          const nonNull = records.filter((r) => !isBlank(r[col]));
+          const unparseable = nonNull.filter((r) => Number.isNaN(Number(r[col]))).length;
+          if (unparseable) addIssue(report, stage, name, "unparseable:" + col, "fail", unparseable, unparseable + " value(s) in " + name + "." + col + " do not parse as numeric");
+          const negative = nonNull.filter((r) => !Number.isNaN(Number(r[col])) && Number(r[col]) < 0).length;
+          if (negative) addIssue(report, stage, name, "negative:" + col, "warn", negative, negative + " negative value(s) in " + name + "." + col);
+          const zero = nonNull.filter((r) => !Number.isNaN(Number(r[col])) && Number(r[col]) === 0).length;
+          if (zero) addIssue(report, stage, name, "zero:" + col, "info", zero, zero + " zero value(s) in " + name + "." + col);
+        }
+        for (const col of DATE_COLUMNS[name] || []) {
+          if (!columns.includes(col)) continue;
+          const nonNull = records.filter((r) => !isBlank(r[col]));
+          const unparseable = nonNull.filter((r) => parseDateLoose(r[col]) === null).length;
+          if (unparseable) addIssue(report, stage, name, "unparseable:" + col, "fail", unparseable, unparseable + " value(s) in " + name + "." + col + " do not parse as a date");
+        }
+        if (name === "orders" && columns.includes("status")) {
+          const observed = new Set(records.map((r) => r.status).filter((v) => !isBlank(v)));
+          const unexpected = [...observed].filter((s) => !EXPECTED_STATUSES.has(s));
+          if (unexpected.length) {
+            const n = records.filter((r) => unexpected.includes(r.status)).length;
+            addIssue(report, stage, name, "unexpected_status", "warn", n, n + " row(s) with status outside [" + [...EXPECTED_STATUSES].join(", ") + "]: " + unexpected.join(", "));
+          }
+        }
+      } else {
+        for (const col of inferNumericColumns(records, columns)) {
+          const nonNull = records.filter((r) => !isBlank(r[col]));
+          const unparseable = nonNull.filter((r) => Number.isNaN(Number(r[col]))).length;
+          if (unparseable) addIssue(report, stage, name, "unparseable:" + col, "info", unparseable, "(inferred numeric column) " + unparseable + " value(s) in " + name + "." + col + " don't parse as numeric");
+        }
+        for (const col of inferDateColumns(records, columns)) {
+          const nonNull = records.filter((r) => !isBlank(r[col]));
+          const unparseable = nonNull.filter((r) => parseDateLoose(r[col]) === null).length;
+          if (unparseable) addIssue(report, stage, name, "unparseable:" + col, "info", unparseable, "(inferred date column) " + unparseable + " value(s) in " + name + "." + col + " don't parse as a date");
+        }
+      }
+    }
+
+    const declaredPairs = new Set(FOREIGN_KEYS.map(([c, cc]) => c + "." + cc));
+    for (const [child, childCol, parent, parentCol] of FOREIGN_KEYS) {
+      if (!tables[child] || !tables[parent]) continue;
+      const parentSet = new Set(tables[parent].records.map((r) => r[parentCol]).filter((v) => !isBlank(v)));
+      const orphans = tables[child].records.filter((r) => !isBlank(r[childCol]) && !parentSet.has(r[childCol]));
+      if (orphans.length) {
+        const distinctMissing = new Set(orphans.map((r) => r[childCol])).size;
+        addIssue(report, stage, child, "orphan_fk:" + childCol + "->" + parent + "." + parentCol, "warn", orphans.length,
+          orphans.length + " " + child + " row(s) reference a " + parentCol + " not present in " + parent + " (" + distinctMissing + " distinct missing value(s))");
+      }
+    }
+
+    const keyOwners = {};
+    for (const name of Object.keys(tables)) {
+      const { columns, records } = tables[name];
+      const key = KNOWN_TABLES.has(name) ? PRIMARY_KEY[name] : inferPrimaryKey(records, columns);
+      if (key) (keyOwners[key] = keyOwners[key] || []).push(name);
+    }
+    for (const child of Object.keys(tables)) {
+      if (KNOWN_TABLES.has(child)) continue;
+      const { columns, records } = tables[child];
+      for (const col of columns) {
+        if (!col.endsWith("_id")) continue;
+        for (const parent of keyOwners[col] || []) {
+          if (parent === child || declaredPairs.has(child + "." + col)) continue;
+          const parentSet = new Set(tables[parent].records.map((r) => r[col]).filter((v) => !isBlank(v)));
+          const orphans = records.filter((r) => !isBlank(r[col]) && !parentSet.has(r[col]));
+          if (orphans.length) {
+            const distinctMissing = new Set(orphans.map((r) => r[col])).size;
+            addIssue(report, stage, child, "orphan_fk:" + col + "->" + parent + "." + col, "info", orphans.length,
+              "(inferred FK) " + orphans.length + " " + child + " row(s) reference a " + col + " not present in " + parent + " (" + distinctMissing + " distinct missing value(s))");
+          }
+        }
+      }
+    }
+
+    if (tables.promotions) {
+      const counts = new Map();
+      for (const r of tables.promotions.records) counts.set(r.order_id, (counts.get(r.order_id) || 0) + 1);
+      const stacked = [...counts.values()].filter((c) => c > 1).length;
+      if (stacked) addIssue(report, stage, "promotions", "stacked_promotions", "info", stacked, stacked + " order(s) carry more than one promotion row");
+    }
+
+    if (tables.orders && tables.promotions) {
+      const amountByOrder = new Map(), seenOrder = new Set();
+      for (const r of tables.orders.records) {
+        const key = tables.orders.columns.map((c) => r[c]).join("");
+        if (seenOrder.has(key)) continue;
+        seenOrder.add(key);
+        amountByOrder.set(r.order_id, Number(r.amount));
+      }
+      const discountByOrder = new Map();
+      for (const r of tables.promotions.records) {
+        const d = Number(r.discount_amount) || 0;
+        discountByOrder.set(r.order_id, (discountByOrder.get(r.order_id) || 0) + d);
+      }
+      let over = 0;
+      for (const [orderId, discount] of discountByOrder) {
+        const amt = amountByOrder.get(orderId);
+        if (amt !== undefined && discount > amt) over++;
+      }
+      if (over) addIssue(report, stage, "promotions", "discount_exceeds_amount", "warn", over, over + " order(s) have total discount greater than the order amount");
+    }
+
+    return report;
+  }
+
+  function logFilter(log, table, rule, before, after) {
+    log.push({ table, rule, rows_before: before, rows_after: after, rows_dropped: before - after });
+  }
+  function dedupeExact(records, columns) {
+    const seen = new Set(), out = [];
+    for (const r of records) {
+      const key = columns.map((c) => r[c]).join("");
+      if (seen.has(key)) continue;
+      seen.add(key); out.push(r);
+    }
+    return out;
+  }
+
+  function applyFilters(tables) {
+    const log = [], filtered = {};
+    if (tables.customers) {
+      const { columns, records } = tables.customers;
+      const before = records.length, seen = new Set(), out = [];
+      for (const r of records) { if (seen.has(r.customer_id)) continue; seen.add(r.customer_id); out.push(r); }
+      logFilter(log, "customers", "duplicate_customer_id", before, out.length);
+      filtered.customers = { columns, records: out };
+    }
+    if (tables.orders) {
+      const { columns } = tables.orders;
+      let records = tables.orders.records, before = records.length;
+      records = dedupeExact(records, columns);
+      logFilter(log, "orders", "exact_duplicate_rows", before, records.length);
+      before = records.length;
+      records = records.filter((r) => !Number.isNaN(Number(r.amount)) && parseDateLoose(r.order_date) !== null);
+      logFilter(log, "orders", "unparseable_amount_or_date", before, records.length);
+      before = records.length;
+      records = records.filter((r) => Number(r.amount) > 0);
+      logFilter(log, "orders", "non_positive_amount", before, records.length);
+      filtered.orders = { columns, records };
+    }
+    if (tables.promotions) {
+      const { columns, records } = tables.promotions;
+      const before = records.length;
+      const out = records.filter((r) => !Number.isNaN(Number(r.discount_amount)) && Number(r.discount_amount) >= 0);
+      logFilter(log, "promotions", "unparseable_or_negative_discount", before, out.length);
+      filtered.promotions = { columns, records: out };
+    }
+    for (const name of Object.keys(tables)) {
+      if (KNOWN_TABLES.has(name)) continue;
+      const { columns, records } = tables[name];
+      const before = records.length;
+      const out = dedupeExact(records, columns);
+      logFilter(log, name, "exact_duplicate_rows", before, out.length);
+      filtered[name] = { columns, records: out };
+    }
+    return { filtered, log };
+  }
+
+  function cleanAll(tables) {
+    const cleaned = {};
+    if (tables.customers) {
+      const records = tables.customers.records.map((r) => {
+        const out = {};
+        for (const k of Object.keys(r)) out[k] = typeof r[k] === "string" ? r[k].trim() : r[k];
+        return out;
+      });
+      cleaned.customers = { columns: tables.customers.columns, records };
+    }
+    if (tables.orders) {
+      const records = tables.orders.records.map((r) => Object.assign({}, r, {
+        amount: Number(r.amount), order_date: r.order_date,
+        status: (r.status || "").trim(), customer_id: (r.customer_id || "").trim(),
+      }));
+      cleaned.orders = { columns: tables.orders.columns, records };
+    }
+    if (tables.promotions) {
+      const byOrder = new Map();
+      for (const r of tables.promotions.records) {
+        const orderId = r.order_id, discount = Number(r.discount_amount) || 0;
+        if (!byOrder.has(orderId)) byOrder.set(orderId, { order_id: orderId, discount_raw: 0, codes: [], n_promos: 0 });
+        const agg = byOrder.get(orderId);
+        agg.discount_raw += discount; agg.codes.push((r.promo_code || "").trim()); agg.n_promos += 1;
+      }
+      const records = [...byOrder.values()].map((a) => ({
+        order_id: a.order_id, discount_raw: a.discount_raw,
+        promo_codes: a.codes.slice().sort().join(" + "), n_promos: a.n_promos,
+      }));
+      cleaned.promotions = { columns: ["order_id", "discount_raw", "promo_codes", "n_promos"], records };
+    }
+    for (const name of Object.keys(tables)) {
+      if (KNOWN_TABLES.has(name)) continue;
+      const { columns, records } = tables[name];
+      const numCols = inferNumericColumns(records, columns);
+      const out = records.map((r) => {
+        const rec = {};
+        for (const k of Object.keys(r)) {
+          let val = typeof r[k] === "string" ? r[k].trim() : r[k];
+          if (numCols.includes(k) && !isBlank(val)) val = Number(val);
+          rec[k] = val;
+        }
+        return rec;
+      });
+      cleaned[name] = { columns, records: out };
+    }
+    return cleaned;
+  }
+
+  function buildAnalysisTable(cleaned) {
+    const customersById = new Map((cleaned.customers ? cleaned.customers.records : []).map((c) => [c.customer_id, c]));
+    const promosByOrder = new Map((cleaned.promotions ? cleaned.promotions.records : []).map((p) => [p.order_id, p]));
+    return cleaned.orders.records.map((o) => {
+      const promo = promosByOrder.get(o.order_id);
+      const discountRaw = promo ? promo.discount_raw : 0;
+      const customer = customersById.get(o.customer_id);
+      const discount = Math.min(discountRaw, o.amount);
+      return Object.assign({}, o, {
+        discount_raw: discountRaw, discount,
+        is_known_customer: !!customer,
+        segment: customer ? customer.segment : "Unknown",
+        customer_name: customer ? customer.customer_name : null,
+        region: customer ? customer.region : null,
+      });
+    });
+  }
+
+  function computeTotalRevenue(analysis) {
+    const completed = analysis.filter((r) => REVENUE_STATUSES.has(r.status));
+    const total_revenue = completed.reduce((s, r) => s + r.amount, 0);
+    const total_discount = completed.reduce((s, r) => s + r.discount, 0);
+    const byStatus = {};
+    for (const r of analysis) {
+      byStatus[r.status] = byStatus[r.status] || { orders: 0, amount: 0 };
+      byStatus[r.status].orders += 1; byStatus[r.status].amount += r.amount;
+    }
+    return { total_revenue, total_discount, net_revenue: total_revenue - total_discount, completed_orders: completed.length, by_status: byStatus };
+  }
+
+  function computeRevenueBySegment(analysis, allSegments) {
+    const completed = analysis.filter((r) => REVENUE_STATUSES.has(r.status));
+    const bySeg = new Map(allSegments.map((s) => [s, { segment: s, orders: 0, revenue: 0, discounts: 0 }]));
+    for (const r of completed) {
+      if (!bySeg.has(r.segment)) bySeg.set(r.segment, { segment: r.segment, orders: 0, revenue: 0, discounts: 0 });
+      const e = bySeg.get(r.segment);
+      e.orders += 1; e.revenue += r.amount; e.discounts += r.discount;
+    }
+    const total = [...bySeg.values()].reduce((s, e) => s + e.revenue, 0);
+    const rows = [...bySeg.values()].map((e) => Object.assign({}, e, {
+      net_revenue: e.revenue - e.discounts,
+      pct_of_revenue: total ? (e.revenue / total) * 100 : 0,
+      avg_order_value: e.orders ? e.revenue / e.orders : 0,
+    }));
+    rows.sort((a, b) => b.revenue - a.revenue);
+    return rows;
+  }
+
+  function computeTopCustomers(analysis, n) {
+    n = n || 5;
+    const completed = analysis.filter((r) => REVENUE_STATUSES.has(r.status) && r.is_known_customer);
+    const byCustomer = new Map();
+    for (const r of completed) {
+      if (!byCustomer.has(r.customer_id)) byCustomer.set(r.customer_id, {
+        customer_id: r.customer_id, customer_name: r.customer_name, segment: r.segment, region: r.region,
+        orders: 0, revenue: 0, discounts: 0,
+      });
+      const e = byCustomer.get(r.customer_id);
+      e.orders += 1; e.revenue += r.amount; e.discounts += r.discount;
+    }
+    const rows = [...byCustomer.values()].map((e) => Object.assign({}, e, { net_revenue: e.revenue - e.discounts }));
+    rows.sort((a, b) => b.revenue - a.revenue);
+    return rows.slice(0, n);
+  }
+
+  function runFinalQC(analysis, opts) {
+    const report = makeReport(), stage = "final_qc", table = "analysis_table";
+    const orderIds = new Set();
+    let dupOrderIds = 0;
+    for (const r of analysis) { if (orderIds.has(r.order_id)) dupOrderIds++; orderIds.add(r.order_id); }
+    if (dupOrderIds) addIssue(report, stage, table, "duplicate_order_id", "fail", dupOrderIds, dupOrderIds + " duplicate order_id(s) survived — a join fanned out");
+    if (analysis.length !== opts.ordersIn) addIssue(report, stage, table, "row_count_mismatch", "fail", Math.abs(analysis.length - opts.ordersIn), "final table has " + analysis.length + " rows but cleaned orders had " + opts.ordersIn);
+    const overCapped = analysis.filter((r) => r.discount > r.amount).length;
+    if (overCapped) addIssue(report, stage, table, "discount_exceeds_amount", "fail", overCapped, overCapped + " row(s) still have discount > amount after capping");
+    const negative = analysis.filter((r) => r.discount < 0 || r.amount < 0).length;
+    if (negative) addIssue(report, stage, table, "negative_value_survived", "fail", negative, "negative amount or discount survived");
+    const diff = Math.abs(opts.segmentRevenueTotal - opts.reportedTotalRevenue);
+    if (diff > 0.01) addIssue(report, stage, table, "segment_checksum", "fail", 1, "revenue-by-segment sums to " + opts.segmentRevenueTotal.toFixed(2) + " but total revenue is " + opts.reportedTotalRevenue.toFixed(2));
+    const capped = analysis.filter((r) => r.discount_raw > r.amount).length;
+    if (capped) {
+      const reduction = analysis.reduce((s, r) => s + (r.discount_raw - r.discount), 0);
+      addIssue(report, stage, table, "discounts_capped", "info", capped, capped + " order(s) had discount capped at the order amount (reduced total discount by " + reduction.toFixed(2) + ")");
+    }
+    return report;
+  }
+
+  function runPipeline(files) {
+    const ledger = [];
+    const recordCount = (stage, tables) => { for (const name of Object.keys(tables)) ledger.push({ stage, table: name, count: tables[name].records.length }); };
+
+    const raw = ingest(files);
+    recordCount("1_raw_ingestion", raw);
+    const initialQC = runInitialQC(raw);
+    const { filtered, log: filterLog } = applyFilters(raw);
+    recordCount("3_filtering", filtered);
+    const cleaned = cleanAll(filtered);
+    recordCount("4_cleaning", cleaned);
+
+    const result = { tables: cleaned, rowCountLedger: ledger, filterLog, initialQC, revenueSummary: null, bySegment: null, top5: null, finalQC: null, analysisTable: null };
+
+    const hasAllRevenueTables = [...REVENUE_TABLES].every((t) => cleaned[t]);
+    if (!hasAllRevenueTables) {
+      const missing = [...REVENUE_TABLES].filter((t) => !cleaned[t]);
+      addIssue(initialQC, "initial_qc", "pipeline", "revenue_tables_missing", "info", missing.length, "skipping the revenue transform — missing " + missing.join(", "));
+      return result;
+    }
+
+    const analysis = buildAnalysisTable(cleaned);
+    ledger.push({ stage: "5_transform", table: "orders", count: analysis.length });
+    const allSegments = [...new Set((raw.customers.records || []).map((c) => c.segment).filter((s) => !isBlank(s)))];
+    if (!allSegments.includes("Unknown")) allSegments.push("Unknown");
+
+    const revenueSummary = computeTotalRevenue(analysis);
+    const bySegment = computeRevenueBySegment(analysis, allSegments);
+    const top5 = computeTopCustomers(analysis, 5);
+    const finalQC = runFinalQC(analysis, {
+      ordersIn: cleaned.orders.records.length,
+      segmentRevenueTotal: bySegment.reduce((s, r) => s + r.revenue, 0),
+      reportedTotalRevenue: revenueSummary.total_revenue,
+    });
+
+    // Mirrors pipeline.run's final_qc.raise_if_failed(): a hard (fail-severity)
+    // finding here means the run is not trusted past this point. The Python/Spark
+    // pipelines stop and never write outputs; this engine keeps the numbers
+    // reachable for inspection but marks the run blocked, and the UI withholds
+    // the report exactly where Python would have raised.
+    result.blocked = finalQC.issues.some((i) => i.severity === "fail");
+    result.analysisTable = analysis;
+    result.revenueSummary = revenueSummary;
+    result.bySegment = bySegment;
+    result.top5 = top5;
+    result.finalQC = finalQC;
+    return result;
+  }
+
+  window.PipelineEngine = { runPipeline };
+})();
+</script>
+
+<script>
+/* ============================== UI LAYER ============================== */
+(function () {
+  "use strict";
+  const engine = window.PipelineEngine;
+
+  const STAGES = [
+    { key: "ingest", n: 1, label: "INGEST", cap: "read as-is", desc: "Every uploaded file is read exactly as provided — no assumptions about types or correctness yet." },
+    { key: "qc1", n: 2, label: "QC · RAW", cap: "profile", desc: "Profiles the raw data: nulls, duplicates, referential integrity, value ranges, unexpected categories. Nothing is fixed here." },
+    { key: "filter", n: 3, label: "FILTER", cap: "drop unfixables", desc: "Drops only rows with no defensible way to keep them — exact duplicates, unparseable values, non-positive amounts." },
+    { key: "clean", n: 4, label: "CLEAN", cap: "fix types", desc: "Fixes types and collapses one-to-many relationships (promotions → orders) before any join, so it can't fan one out." },
+    { key: "transform", n: 5, label: "TRANSFORM", cap: "join + compute", desc: "Joins the tables and derives the requested metrics. Ambiguous rows (unknown customer, oversized discount) are labeled, not dropped." },
+    { key: "qc2", n: 6, label: "QC · FINAL", cap: "validate output", desc: "Validates the pipeline's own output — row counts reconcile, the join didn't fan out, checksums tie out." },
+    { key: "results", n: 7, label: "RESULTS", cap: "the report", desc: "Total revenue, net revenue, revenue by segment, top customers." },
+  ];
+
+  const NODE_W = 132, NODE_H = 64, GAP = (1180 - 70 - 70 - NODE_W) / (STAGES.length - 1);
+  function stageX(i) { return 70 + i * GAP - NODE_W / 2; }
+  const svgNS = "http://www.w3.org/2000/svg";
+
+  function buildDiagram() {
+    const g = document.getElementById("stage-nodes");
+    STAGES.forEach((st, i) => {
+      const cx = 70 + i * GAP;
+      const x = cx - NODE_W / 2;
+      const node = document.createElementNS(svgNS, "g");
+      node.setAttribute("class", "stage-node");
+      node.setAttribute("id", "node-" + st.key);
+      node.innerHTML =
+        '<rect class="card" x="' + x + '" y="63" width="' + NODE_W + '" height="' + NODE_H + '" rx="6"></rect>' +
+        '<text class="num" x="' + (x + 10) + '" y="78">STAGE ' + st.n + '</text>' +
+        '<text class="label" x="' + (x + 10) + '" y="98">' + st.label + '</text>' +
+        '<text class="cap" x="' + (x + 10) + '" y="115">' + st.cap + '</text>' +
+        '<circle class="ring" cx="' + cx + '" cy="163" r="5" fill="none" stroke="var(--accent)" stroke-width="2"></circle>' +
+        '<circle class="status-dot" cx="' + cx + '" cy="163" r="5" fill="var(--muted)" data-dot="' + st.key + '"></circle>';
+      g.appendChild(node);
+      if (i < STAGES.length - 1) {
+        const nextCx = 70 + (i + 1) * GAP;
+        const line = document.createElementNS(svgNS, "line");
+        const midX = (cx + nextCx) / 2;
+        line.setAttribute("x1", cx + NODE_W / 2 - 6);
+        line.setAttribute("y1", 95);
+        line.setAttribute("x2", nextCx - NODE_W / 2 + 2);
+        line.setAttribute("y2", 95);
+        line.setAttribute("class", "pipe-line");
+        line.setAttribute("marker-end", "url(#arrow)");
+        g.appendChild(line);
+      }
+    });
+  }
+  buildDiagram();
+
+  function setDot(key, sev) {
+    const el = document.querySelector('[data-dot="' + key + '"]');
+    if (!el) return;
+    const color = sev === "fail" ? "var(--critical)" : sev === "warn" ? "var(--warning)" : sev === "info" ? "var(--info)" : "var(--good)";
+    el.setAttribute("fill", color);
+  }
+  function setActive(key) {
+    document.querySelectorAll(".stage-node").forEach((n) => n.classList.remove("active"));
+    if (key) document.getElementById("node-" + key).classList.add("active");
+  }
+  function setDone(key) {
+    document.getElementById("node-" + key).classList.remove("active");
+    document.getElementById("node-" + key).classList.add("done");
+  }
+
+  // ---------- file intake ----------
+  let uploadedFiles = [];
+  const dropzone = document.getElementById("dropzone");
+  const fileInput = document.getElementById("fileInput");
+  const manifestChips = document.getElementById("manifestChips");
+  const runBtn = document.getElementById("runBtn");
+  const errorBanner = document.getElementById("errorBanner");
+
+  function showError(msg) {
+    if (!msg) { errorBanner.style.display = "none"; return; }
+    errorBanner.textContent = msg;
+    errorBanner.style.display = "block";
+  }
+
+  function renderChips() {
+    manifestChips.innerHTML = "";
+    uploadedFiles.forEach((f, idx) => {
+      const name = f.name.replace(/\.csv$/i, "").toLowerCase();
+      const known = ["customers", "orders", "promotions"].includes(name);
+      const chip = document.createElement("div");
+      chip.className = "chip";
+      chip.innerHTML =
+        '<span class="name">' + f.name + '</span>' +
+        '<span class="tag ' + (known ? "known" : "") + '">' + (known ? "known table" : "generic") + '</span>' +
+        '<button aria-label="Remove ' + f.name + '" data-idx="' + idx + '">✕</button>';
+      manifestChips.appendChild(chip);
+    });
+    runBtn.disabled = uploadedFiles.length === 0;
+  }
+  manifestChips.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-idx]");
+    if (!btn) return;
+    uploadedFiles.splice(Number(btn.dataset.idx), 1);
+    renderChips();
+  });
+
+  function addFiles(fileList) {
+    showError(null);
+    const arr = Array.from(fileList).filter((f) => /\.csv$/i.test(f.name));
+    let pending = arr.length;
+    if (!pending) return;
+    arr.forEach((f) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        uploadedFiles.push({ name: f.name, text: reader.result });
+        pending--;
+        if (pending === 0) renderChips();
+      };
+      reader.onerror = () => { pending--; if (pending === 0) renderChips(); };
+      reader.readAsText(f);
+    });
+  }
+
+  dropzone.addEventListener("click", () => fileInput.click());
+  dropzone.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); } });
+  fileInput.addEventListener("change", (e) => addFiles(e.target.files));
+  ["dragenter", "dragover"].forEach((evt) => dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add("drag"); }));
+  ["dragleave", "drop"].forEach((evt) => dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove("drag"); }));
+  dropzone.addEventListener("drop", (e) => { if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+
+  document.getElementById("clearBtn").addEventListener("click", () => {
+    uploadedFiles = []; renderChips(); showError(null);
+    document.getElementById("manifestSection").classList.add("hidden");
+    document.getElementById("resultsSection").classList.add("hidden");
+    document.querySelectorAll(".stage-node").forEach((n) => { n.classList.remove("active", "done"); });
+    document.querySelectorAll(".status-dot").forEach((n) => n.setAttribute("fill", "var(--muted)"));
+  });
+
+  // ---------- sample data (embedded, small — see sample_data/ in repo for larger downloadable versions) ----------
+  const SAMPLES = {
+    clean: {
+      "customers.csv": "customer_id,customer_name,segment,region\n" +
+        "1,Harbor & Finch,Enterprise,West\n2,Bramblewood Supply,SMB,East\n3,Nimbus Textiles,SMB,South\n4,Cobalt & Sons,Enterprise,Midwest\n5,Driftwood Analytics,Mid-Market,West\n",
+      "orders.csv": "order_id,customer_id,order_date,amount,status\n" +
+        Array.from({ length: 20 }, (_, i) => {
+          const cust = (i % 4) + 1;
+          const day = 1 + (i % 27);
+          const amt = (120 + i * 37.5).toFixed(2);
+          return "o" + (i + 1) + "," + cust + ",2025-0" + (1 + (i % 6)) + "-" + String(day).padStart(2, "0") + "," + amt + ",completed";
+        }).join("\n") + "\n",
+      "promotions.csv": "promotion_id,order_id,promo_code,discount_amount\n" +
+        "p1,o2,WELCOME10,15.00\np2,o5,SAVE20,20.00\np3,o11,WELCOME10,10.00\n",
+    },
+    dirty: {
+      "customers.csv": "customer_id,customer_name,segment,region\n" +
+        "1,Harbor & Finch,Enterprise,West\n2,Bramblewood Supply,SMB,East\n3,Nimbus Textiles,SMB,South\n",
+      "orders.csv": "order_id,customer_id,order_date,amount,status\n" +
+        "o1,1,2025-01-01,240.00,completed\n" +
+        "o1,1,2025-01-01,240.00,completed\n" +          // exact duplicate
+        "o2,2,2025-01-02,50.00,completed\n" +            // discount below will exceed this
+        "o3,3,not-a-date,90.00,completed\n" +            // bad date
+        "o4,999,2025-01-04,60.00,completed\n" +          // orphan customer
+        "o5,1,2025-01-05,-40.00,completed\n" +           // negative amount
+        "o6,2,2025-01-06,0.00,completed\n" +              // zero amount
+        "o7,3,2025-01-07,150.00,chargeback\n" +           // unexpected status
+        "o8,2,2025-01-08,50.00,refunded\n" +
+        "o9,1,2025-01-09,300.00,cancelled\n",
+      "promotions.csv": "promotion_id,order_id,promo_code,discount_amount\n" +
+        "p1,o2,SAVE10,10.00\np2,o2,SAVE50,60.00\n",       // stacked (70 total) and exceeds o2's 50 amount -> gets capped
+    },
+    generalization: {
+      "customers.csv": "customer_id,customer_name,segment,region\n1,Harbor & Finch,Enterprise,West\n2,Bramblewood Supply,SMB,East\n",
+      "orders.csv": "order_id,customer_id,order_date,amount,status\no1,1,2025-01-01,240.00,completed\no2,2,2025-01-02,180.00,completed\n",
+      "promotions.csv": "promotion_id,order_id,promo_code,discount_amount\np1,o1,SAVE10,10.00\n",
+      "support_tickets.csv": "ticket_id,customer_id,opened_at,priority\n" +
+        "t1,1,2025-02-01,high\nt1,1,2025-02-01,high\nt2,2,2025-02-02,low\nt3,999,2025-02-03,low\n",
+    },
+  };
+
+  document.querySelectorAll(".sample-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.sample;
+      const files = SAMPLES[key];
+      uploadedFiles = Object.keys(files).map((name) => ({ name, text: files[name] }));
+      renderChips();
+      showError(null);
+    });
+  });
+
+  // ---------- run ----------
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function fmtMoney(n) { return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function fmtInt(n) { return n.toLocaleString("en-US"); }
+
+  function sevBadge(sev) {
+    const map = { fail: "FAIL", warn: "WARN", info: "INFO", pass: "PASS" };
+    return '<span class="sev-badge sev-' + sev + '">' + map[sev] + "</span>";
+  }
+
+  function worstSeverity(issues) {
+    if (issues.some((i) => i.severity === "fail")) return "fail";
+    if (issues.some((i) => i.severity === "warn")) return "warn";
+    if (issues.some((i) => i.severity === "info")) return "info";
+    return "pass";
+  }
+
+  function renderIssueList(issues) {
+    if (!issues.length) return '<div class="no-issues">✓ nothing to report</div>';
+    return '<div class="issue-list">' + issues.map((i) =>
+      '<div class="issue">' + sevBadge(i.severity) +
+      '<div class="msg"><span class="table-name">' + i.table + "</span> · <span class=\"check-name\">" + i.check + "</span><br>" + i.detail + "</div></div>"
+    ).join("") + "</div>";
+  }
+
+  function ledgerTable(rows, stageName) {
+    const filtered = rows.filter((r) => r.stage === stageName);
+    if (!filtered.length) return "";
+    return '<table class="ledger"><thead><tr><th>Table</th><th>Rows</th></tr></thead><tbody>' +
+      filtered.map((r) => "<tr><td class=\"mono\">" + r.table + "</td><td class=\"num\">" + fmtInt(r.count) + "</td></tr>").join("") +
+      "</tbody></table>";
+  }
+
+  function filterLogTable(log) {
+    if (!log.length) return "";
+    return '<table class="ledger"><thead><tr><th>Table</th><th>Rule</th><th>Before</th><th>After</th><th>Dropped</th></tr></thead><tbody>' +
+      log.map((r) => "<tr><td class=\"mono\">" + r.table + "</td><td>" + r.rule + "</td><td class=\"num\">" + fmtInt(r.rows_before) + "</td><td class=\"num\">" + fmtInt(r.rows_after) + "</td><td class=\"num\">" + fmtInt(r.rows_dropped) + "</td></tr>").join("") +
+      "</tbody></table>";
+  }
+
+  async function runPipelineUI() {
+    showError(null);
+    let result;
+    try {
+      result = engine.runPipeline(uploadedFiles);
+    } catch (err) {
+      showError("Couldn't run the pipeline: " + err.message);
+      return;
+    }
+
+    const manifestSection = document.getElementById("manifestSection");
+    const stageCards = document.getElementById("stageCards");
+    const resultsSection = document.getElementById("resultsSection");
+    manifestSection.classList.remove("hidden");
+    resultsSection.classList.add("hidden");
+    stageCards.innerHTML = "";
+    document.querySelectorAll(".stage-node").forEach((n) => n.classList.remove("active", "done"));
+    document.querySelectorAll(".status-dot").forEach((n) => n.setAttribute("fill", "var(--muted)"));
+    manifestSection.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    const skip = document.getElementById("skipAnim").checked || prefersReducedMotion;
+    const delay = skip ? 0 : 550;
+
+    function makeCard(stageDef, bodyHtml, sevForDot) {
+      const card = document.createElement("div");
+      card.className = "stage-card";
+      card.innerHTML =
+        '<div class="head"><span class="n">' + String(stageDef.n).padStart(2, "0") + '</span><h4>' + stageDef.label + "</h4>" +
+        '<span class="outcome">' + sevBadge(sevForDot === "pass" ? "pass" : sevForDot) + "</span></div>" +
+        '<div class="desc">' + stageDef.desc + "</div>" + bodyHtml;
+      stageCards.appendChild(card);
+      requestAnimationFrame(() => card.classList.add("show"));
+      return card;
+    }
+
+    // Stage 1 — ingest
+    setActive("ingest");
+    await sleep(delay);
+    const ingestBody = ledgerTable(result.rowCountLedger, "1_raw_ingestion");
+    makeCard(STAGES[0], ingestBody, "pass");
+    setDone("ingest"); setDot("ingest", "pass");
+
+    // Stage 2 — QC raw
+    setActive("qc1");
+    await sleep(delay);
+    const qc1Sev = worstSeverity(result.initialQC.issues);
+    makeCard(STAGES[1], renderIssueList(result.initialQC.issues), qc1Sev);
+    setDone("qc1"); setDot("qc1", qc1Sev);
+
+    // Stage 3 — filter
+    setActive("filter");
+    await sleep(delay);
+    const totalDropped = result.filterLog.reduce((s, r) => s + r.rows_dropped, 0);
+    makeCard(STAGES[2], filterLogTable(result.filterLog) || "<div class=\"no-issues\">✓ nothing dropped</div>", totalDropped > 0 ? "info" : "pass");
+    setDone("filter"); setDot("filter", totalDropped > 0 ? "info" : "pass");
+
+    // Stage 4 — clean
+    setActive("clean");
+    await sleep(delay);
+    makeCard(STAGES[3], ledgerTable(result.rowCountLedger, "4_cleaning"), "pass");
+    setDone("clean"); setDot("clean", "pass");
+
+    // Stage 5 — transform
+    setActive("transform");
+    await sleep(delay);
+    const transformBody = result.analysisTable
+      ? '<div class="kv-row"><span class="kv">Analysis rows: <b>' + fmtInt(result.analysisTable.length) + "</b></span></div>"
+      : '<div class="no-issues" style="color:var(--info)">Skipped — needs customers + orders + promotions all present.</div>';
+    makeCard(STAGES[4], transformBody, result.analysisTable ? "pass" : "info");
+    setDone("transform"); setDot("transform", result.analysisTable ? "pass" : "info");
+
+    // Stage 6 — QC final
+    setActive("qc2");
+    await sleep(delay);
+    const qc2Issues = result.finalQC ? result.finalQC.issues : [];
+    const qc2Sev = result.finalQC ? worstSeverity(qc2Issues) : "info";
+    makeCard(STAGES[5], result.finalQC ? renderIssueList(qc2Issues) : '<div class="no-issues" style="color:var(--info)">Skipped along with transform.</div>', qc2Sev);
+    setDone("qc2"); setDot("qc2", qc2Sev);
+
+    // Stage 7 — results
+    setActive("results");
+    await sleep(delay);
+    let resultsBody, resultsSev;
+    if (result.blocked) {
+      resultsBody = '<div class="issue">' + sevBadge("fail") + '<div class="msg">Blocked — stage 6 found a hard failure, so this run stops here, exactly like the Python/Spark pipelines would (they never write outputs after a failed <span class="mono">raise_if_failed()</span>). Fix the flagged issue and re-run.</div></div>';
+      resultsSev = "fail";
+    } else if (result.revenueSummary) {
+      resultsBody = '<div class="no-issues">✓ report generated — see below</div>';
+      resultsSev = "pass";
+    } else {
+      resultsBody = '<div class="no-issues" style="color:var(--info)">No report — revenue tables incomplete.</div>';
+      resultsSev = "info";
+    }
+    makeCard(STAGES[6], resultsBody, resultsSev);
+    setDone("results"); setDot("results", resultsSev);
+    setActive(null);
+
+    renderResults(result);
+    resultsSection.classList.remove("hidden");
+  }
+
+  document.getElementById("runBtn").addEventListener("click", runPipelineUI);
+
+  // ---------- results rendering ----------
+  const SEG_COLOR = {
+    Enterprise: "var(--series-enterprise)",
+    SMB: "var(--series-smb)",
+    "Mid-Market": "var(--series-midmarket)",
+    Unknown: "var(--series-unknown)",
+  };
+  function segColor(name) { return SEG_COLOR[name] || "var(--muted)"; }
+
+  let lastResult = null;
+
+  function renderResults(result) {
+    lastResult = result;
+    const noNote = document.getElementById("noRevenueNote");
+    const blockedNote = document.getElementById("blockedNote");
+    const block = document.getElementById("revenueBlock");
+    const downloadReportBtn = document.getElementById("downloadReport");
+    const downloadResultsBtn = document.getElementById("downloadResults");
+
+    if (result.blocked) {
+      document.getElementById("reportSub").textContent = "HALTED";
+      noNote.classList.add("hidden"); block.classList.add("hidden"); blockedNote.classList.remove("hidden");
+      downloadReportBtn.disabled = true; downloadResultsBtn.disabled = true;
+      return;
+    }
+    blockedNote.classList.add("hidden");
+    downloadReportBtn.disabled = false;
+
+    document.getElementById("reportSub").textContent = result.revenueSummary ? "REVENUE REPORT" : "DATA-QUALITY ONLY";
+    if (!result.revenueSummary) { noNote.classList.remove("hidden"); block.classList.add("hidden"); downloadResultsBtn.disabled = true; return; }
+    noNote.classList.add("hidden"); block.classList.remove("hidden"); downloadResultsBtn.disabled = false;
+
+    const rs = result.revenueSummary;
+    const discountRate = rs.total_revenue ? (rs.total_discount / rs.total_revenue) * 100 : 0;
+    const stats = [
+      { label: "Total revenue", value: fmtMoney(rs.total_revenue), sub: fmtInt(rs.completed_orders) + " completed orders" },
+      { label: "Net revenue", value: fmtMoney(rs.net_revenue), sub: "after discounts" },
+      { label: "Discounts", value: fmtMoney(rs.total_discount), sub: discountRate.toFixed(2) + "% of revenue" },
+      { label: "Segments found", value: String(result.bySegment.length), sub: result.bySegment.map((s) => s.segment).join(" · ") },
+    ];
+    document.getElementById("statGrid").innerHTML = stats.map((s) =>
+      '<div class="stat-tile"><div class="label">' + s.label + '</div><div class="value mono">' + s.value + '</div><div class="sub">' + s.sub + "</div></div>"
+    ).join("");
+
+    const maxRev = Math.max(...result.bySegment.map((s) => s.revenue), 1);
+    document.getElementById("segmentChart").innerHTML = result.bySegment.map((s) => {
+      const widthPct = (s.revenue / maxRev) * 100;
+      return '<div class="bar-row">' +
+        '<div class="seg-name" style="color:' + segColor(s.segment) + '">' + s.segment + "</div>" +
+        '<div class="bar-track"><div class="bar-fill" style="width:' + widthPct + "%;background:" + segColor(s.segment) + '"></div></div>' +
+        '<div class="bar-val">' + fmtMoney(s.revenue) + ' <span class="pct">' + s.pct_of_revenue.toFixed(1) + "%</span></div></div>";
+    }).join("");
+
+    document.getElementById("segmentTable").innerHTML =
+      '<table class="datatable"><thead><tr><th>Segment</th><th>Orders</th><th>Revenue</th><th>Discounts</th><th>Net revenue</th><th>% of total</th></tr></thead><tbody>' +
+      result.bySegment.map((s) =>
+        "<tr><td>" + s.segment + "</td><td class=\"num\">" + fmtInt(s.orders) + "</td><td class=\"num\">" + fmtMoney(s.revenue) +
+        "</td><td class=\"num\">" + fmtMoney(s.discounts) + "</td><td class=\"num\">" + fmtMoney(s.net_revenue) + "</td><td class=\"num\">" + s.pct_of_revenue.toFixed(2) + "%</td></tr>"
+      ).join("") + "</tbody></table>";
+
+    document.getElementById("top5Table").innerHTML =
+      '<table class="datatable"><thead><tr><th>#</th><th>Customer</th><th>Segment</th><th>Region</th><th>Orders</th><th>Revenue</th><th>Net revenue</th></tr></thead><tbody>' +
+      result.top5.map((c, i) =>
+        '<tr><td class="rank">' + (i + 1) + "</td><td>" + c.customer_name + "</td><td>" + c.segment + "</td><td>" + (c.region || "—") +
+        "</td><td class=\"num\">" + fmtInt(c.orders) + "</td><td class=\"num\">" + fmtMoney(c.revenue) + "</td><td class=\"num\">" + fmtMoney(c.net_revenue) + "</td></tr>"
+      ).join("") + "</tbody></table>";
+  }
+
+  document.getElementById("toggleChartView").addEventListener("click", () => {
+    const chart = document.getElementById("segmentChart");
+    const table = document.getElementById("segmentTable");
+    const showingChart = !chart.classList.contains("hidden");
+    chart.classList.toggle("hidden", showingChart);
+    table.classList.toggle("hidden", !showingChart);
+    document.getElementById("toggleChartView").textContent = showingChart ? "View as chart" : "View as table";
+  });
+
+  function download(filename, dataObj) {
+    const blob = new Blob([JSON.stringify(dataObj, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+  document.getElementById("downloadReport").addEventListener("click", () => {
+    if (!lastResult || lastResult.blocked) return;
+    download("qc_report.json", {
+      row_count_ledger: lastResult.rowCountLedger,
+      filter_log: lastResult.filterLog,
+      initial_qc_issues: lastResult.initialQC.issues,
+      final_qc_issues: lastResult.finalQC ? lastResult.finalQC.issues : [],
+    });
+  });
+  document.getElementById("downloadResults").addEventListener("click", () => {
+    if (!lastResult || lastResult.blocked || !lastResult.revenueSummary) return;
+    download("results.json", {
+      revenue_summary: lastResult.revenueSummary,
+      by_segment: lastResult.bySegment,
+      top5: lastResult.top5,
+    });
+  });
+})();
+</script>
