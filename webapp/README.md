@@ -22,12 +22,11 @@ open the file and it works.
    — and then either the revenue dashboard, a note that revenue needs all
    three known tables, or a **blocked** notice (see below).
 4. **Download the QC report** as **.md** (readable), **.json** (parseable),
-   or **.pdf** — all three carry the same health/comparison/change-summary/
-   results content; the PDF button opens a new tab with everything
-   pre-formatted for printing, so "Save as PDF" is one more click away (see
-   "About the PDF download," below, for why it works this way). Every
-   download also opens an on-page panel with the same content and a copy
-   button — if a save dialog or new tab doesn't appear for you, that panel
+   or **.pdf** (an actual generated PDF file, no print dialog involved — see
+   "About the PDF download," below) — all three carry the same
+   health/comparison/change-summary/results content. Every download also
+   opens an on-page panel with the report's text and a copy button — if a
+   save dialog doesn't appear for you, that panel
    is the fallback (see "If a download button doesn't seem to do anything,"
    further down).
 
@@ -119,39 +118,52 @@ a full report.
 
 ## About the PDF download
 
-There's no PDF-writing code in this page, and there's no bundled library
-either — both would either need a server or a CDN, and this is a
-self-contained, offline-capable page with a strict content-security policy
-that blocks exactly that. **Download QC report (.pdf)** instead clones the
-already-rendered Report section (the same DOM the health/comparison/change-
-summary panels are already sitting in, no separate report-building code to
-keep in sync) into a normally-invisible container, opens a new browser tab
-with that content and a print-only stylesheet (light, high-contrast colors
-regardless of your theme; the segment-revenue bars swapped for the plain
-data table, since whether a CSS background color survives to PDF depends on
-a "print background graphics" setting this page can't see or control — a
-bordered table with the same numbers doesn't have that problem), and calls
-that tab's own `print()`. From there, "Save as PDF" — the default
-destination in most browsers — is what actually produces the file; this
-page hands off to the browser's print engine rather than reimplementing one.
+The first version of this button used `window.print()`: clone the rendered
+report into a hidden container, open a new tab, print it. That depends on
+permissions a page can't grant itself — a sandboxed embed without
+`allow-popups`/`allow-modals` swallows both `window.open()` and
+`window.print()` silently, no error, the click just does nothing. That's
+exactly the failure this replaced.
 
-If opening a new tab is blocked (some embeds disallow pop-ups), it falls
-back to printing the current page directly.
+**Download QC report (.pdf)** now hand-generates an actual PDF file — real
+bytes, built by string concatenation in `buildPdf()`, no library, no CDN
+(both would need a server or violate the page's content-security policy).
+It uses one of PDF's 14 standard fonts (Courier — built into every PDF
+reader, needs no embedding) and lays out the same markdown report text used
+for the `.md` download as wrapped, paginated monospace lines. The resulting
+bytes go through the *exact* same `downloadBlob()` path already used for
+`.md`/`.json` — no `window.print`, no `window.open`, nothing that needs a
+permission a sandboxed context might withhold.
+
+The one real constraint this creates: PDF's standard fonts don't cover
+arbitrary Unicode — no curly quotes, no checkmarks — and `Blob([string])`
+encodes as UTF-8, which only equals the intended ASCII bytes for code points
+under 0x80. `sanitizeAscii()` maps this report's actual Unicode characters
+(em dashes, curly quotes, the checkmark, a handful of others — see
+`PDF_ASCII_MAP` in `index.html`) to plain ASCII, and falls back to `?` for
+anything unexpected, so the file is always well-formed even if some future
+report text uses a character nobody thought to map. Verified with a real
+PDF parser (`pdfjs-dist` — Firefox's own PDF engine), not just "it looks like
+a PDF": generated one from the actual ~30K-row dataset's report, parsed it
+back, and diffed the extracted text against the source — exact match,
+correct 2-page pagination, zero non-ASCII bytes in the file. Same check
+against a **blocked** run's report (health/comparison/change-summary intact,
+the BLOCKED explanation in place of numbers) and a couple of pathological
+inputs (empty text, a single 500-character unbroken "word") — all produced
+valid, parseable PDFs.
 
 ## If a download button doesn't seem to do anything
 
 Some contexts a browser can run this page in — a sandboxed iframe without
-download permission, certain restricted embeds — silently swallow a
-triggered download or a print call: the click fires, nothing throws, and no
-file or dialog appears. There's no reliable way for the page to detect that
-happened, so every one of the three download buttons pairs its attempt with
-an always-shown fallback panel containing the same content and a **Copy to
-clipboard** button (for `.md`/`.json`; the PDF button's fallback is an
-instruction, since there's no meaningful plain-text form of a print job).
-If the save dialog or new tab you expected doesn't show up, that panel is
-where the report still is — copy it out, or (for the PDF case) open
-`webapp/index.html` directly in an ordinary, non-embedded browser tab, where
-none of this applies.
+download permission, certain restricted embeds — can still silently swallow
+a triggered `<a download>` click: it fires, nothing throws, no file appears.
+There's no reliable way for the page to detect that happened, so every one
+of the three download buttons pairs its attempt with an always-shown
+fallback panel containing the report's text and a **Copy to clipboard**
+button. If the save dialog you expected doesn't show up, that panel is where
+the report still is — copy it out, or open `webapp/index.html` directly in
+an ordinary, non-embedded browser tab, where this is far less likely to come
+up at all.
 
 ## How this maps to the Python pipeline
 

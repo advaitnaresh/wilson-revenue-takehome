@@ -395,40 +395,6 @@
 
   .hidden { display: none !important; }
   [aria-live] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-
-  /* ============================== PRINT / PDF ============================== */
-  /* "Download QC report (PDF)" clones the already-rendered Report section into
-     #printView, then calls window.print() — the browser's own print-to-PDF is
-     the PDF engine, so nothing here has to hand-generate PDF bytes. On screen
-     #printView is always empty and hidden; @media print flips which half of
-     the page is visible. */
-  #printView { display: none; }
-  #printView .doc-title { font-size: 22px; margin-bottom: 2px; }
-  #printView .doc-meta { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
-
-  @media print {
-    /* Force the light palette regardless of the viewer's theme — printed
-       paper is white paper, not a screen the OS dark-mode setting applies to. */
-    :root, :root[data-theme="dark"], :root[data-theme="light"] {
-      --paper: #ffffff !important; --surface: #ffffff !important; --surface-2: #f5f5f5 !important;
-      --ink: #111111 !important; --ink-2: #333333 !important; --muted: #666666 !important;
-      --line: #cccccc !important; --line-strong: #999999 !important;
-      --accent: #0e7c86 !important; --accent-ink: #ffffff !important;
-      --good: #0a7a0a !important; --warning: #93600a !important; --critical: #a8241a !important; --info: #38449a !important;
-      --good-wash: #eaf6ea !important; --warning-wash: #fbf0dd !important; --critical-wash: #fbeceb !important; --info-wash: #eaecfa !important;
-      --series-enterprise: #2a78d6 !important; --series-smb: #d1591f !important; --series-midmarket: #128a63 !important; --series-unknown: #a6720a !important;
-      --shadow-card: none !important;
-    }
-    body > *:not(#printView) { display: none !important; }
-    #printView { display: block !important; }
-    body { background: #fff !important; }
-    .wrap { max-width: 100% !important; padding: 0 !important; }
-    section { padding: 0 !important; }
-    .panel, .health-panel { box-shadow: none !important; border: 1px solid var(--line-strong) !important; }
-    .issue, tr, .stat-tile, .bar-row { break-inside: avoid; page-break-inside: avoid; }
-    a { color: var(--ink) !important; text-decoration: none !important; }
-  }
-  @page { margin: 16mm 14mm; }
 </style>
 
 <header class="top">
@@ -630,8 +596,6 @@
     <div>Files are parsed and processed locally; nothing is uploaded anywhere.</div>
   </div>
 </footer>
-
-<div id="printView" aria-hidden="true"></div>
 
 <script>
 /* ======================================================================
@@ -38016,67 +37980,138 @@
     showReportPreview("qc_report.json", "A save dialog should have opened just now. If it didn't, copy the text below and save it yourself as qc_report.json.", text);
   });
 
-  // PDF: there's no PDF-writing code here — the browser's own print-to-PDF is
-  // the PDF engine. This clones the Report section exactly as already
-  // rendered on screen into #printView, strips the interactive-only bits
-  // (buttons, the chart/table toggle, the preview panel), forces the table
-  // view in place of the chart (background-color bars aren't reliable across
-  // print settings; a bordered table with the same numbers is), and prints —
-  // @media print (in the <style> block) hides everything else on the page.
-  function preparePrintView(result) {
-    const source = document.getElementById("resultsSection");
-    const clone = source.cloneNode(true);
-    clone.classList.remove("hidden");
-    clone.querySelectorAll("button, .downloads, .toggle-view, #reportPreviewPanel").forEach((el) => el.remove());
-    const chart = clone.querySelector("#segmentChart");
-    const table = clone.querySelector("#segmentTable");
-    if (chart) chart.style.display = "none";
-    if (table) table.classList.remove("hidden");
+  // PDF: hand-rolled, on purpose. window.print()/window.open() depend on
+  // permissions a page can't grant itself — a sandboxed embed without
+  // "allow-popups"/"allow-modals" silently swallows both, which is exactly
+  // the failure this replaced (no error, the click just does nothing). A PDF
+  // file is just bytes; building those bytes directly needs no permission at
+  // all, and can go through the exact same Blob-download path already used
+  // for .md/.json above.
+  //
+  // Scope: one monospace standard-14 font (Courier — built into every PDF
+  // reader, no font embedding required) and strict printable ASCII. PDF's
+  // standard fonts don't cover arbitrary Unicode (no curly quotes, no
+  // checkmarks), and Blob([string]) encodes as UTF-8 — for that to produce
+  // exactly the bytes the xref table's byte-offsets are computed against,
+  // every character in the file has to stay where UTF-8 and ASCII agree
+  // (0x00-0x7F). sanitizeAscii() maps the handful of Unicode characters this
+  // report actually uses (em dashes, curly quotes, the checkmark, etc. — see
+  // ASCII_MAP) to plain ASCII equivalents; anything unexpected falls back to
+  // "?" rather than producing an invalid file.
+  const PDF_PAGE_W = 612, PDF_PAGE_H = 792, PDF_MARGIN_X = 48, PDF_MARGIN_Y = 54;
+  const PDF_FONT_SIZE = 9, PDF_LINE_HEIGHT = 11.5;
+  const PDF_CHAR_WIDTH = PDF_FONT_SIZE * 0.6; // Courier: fixed 600/1000 em
 
-    const printView = document.getElementById("printView");
-    printView.innerHTML = "";
-    const title = document.createElement("div");
-    title.className = "doc-title";
-    title.textContent = "Pipeline QC Report";
-    const meta = document.createElement("div");
-    meta.className = "doc-meta";
-    meta.textContent = "Generated " + new Date().toLocaleString();
-    printView.appendChild(title);
-    printView.appendChild(meta);
-    printView.appendChild(clone);
+  const PDF_ASCII_MAP = {
+    "—": "--", "–": "-",
+    "‘": "'", "’": "'", "“": '"', "”": '"',
+    "•": "-", "·": "-",
+    "→": "->", "←": "<-", "↔": "<->",
+    "▲": "^", "▼": "v", "▣": "#",
+    "✓": "OK", "✕": "x", "⤒": "^",
+    "×": "x",
+  };
+
+  function pdfSanitizeAscii(text) {
+    let out = "";
+    for (const ch of String(text)) {
+      if (PDF_ASCII_MAP[ch] !== undefined) { out += PDF_ASCII_MAP[ch]; continue; }
+      const code = ch.codePointAt(0);
+      if (code === 0x0a) { out += "\n"; continue; }
+      if (code >= 0x20 && code <= 0x7e) { out += ch; continue; }
+      out += "?";
+    }
+    return out;
+  }
+
+  function pdfWrapLine(line, maxChars) {
+    if (line.length <= maxChars) return [line];
+    const words = line.split(" ");
+    const wrapped = [];
+    let cur = "";
+    for (let word of words) {
+      while (word.length > maxChars) {
+        if (cur) { wrapped.push(cur); cur = ""; }
+        wrapped.push(word.slice(0, maxChars));
+        word = word.slice(maxChars);
+      }
+      const candidate = cur ? cur + " " + word : word;
+      if (candidate.length > maxChars) { wrapped.push(cur); cur = word; } else { cur = candidate; }
+    }
+    if (cur) wrapped.push(cur);
+    return wrapped.length ? wrapped : [""];
+  }
+
+  function pdfLayoutPages(rawText) {
+    const maxChars = Math.floor((PDF_PAGE_W - 2 * PDF_MARGIN_X) / PDF_CHAR_WIDTH);
+    const linesPerPage = Math.floor((PDF_PAGE_H - 2 * PDF_MARGIN_Y) / PDF_LINE_HEIGHT);
+    const allLines = [];
+    for (const rl of pdfSanitizeAscii(rawText).split("\n")) {
+      for (const wrapped of pdfWrapLine(rl, maxChars)) allLines.push(wrapped);
+    }
+    const pages = [];
+    for (let i = 0; i < allLines.length; i += linesPerPage) pages.push(allLines.slice(i, i + linesPerPage));
+    return pages.length ? pages : [[""]];
+  }
+
+  function pdfEscapeString(s) {
+    return s.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+  }
+
+  function pdfContentStream(lines) {
+    const top = PDF_PAGE_H - PDF_MARGIN_Y;
+    let stream = "BT\n/F1 " + PDF_FONT_SIZE + " Tf\n" + PDF_LINE_HEIGHT + " TL\n" + PDF_MARGIN_X + " " + top + " Td\n";
+    lines.forEach((line, i) => {
+      stream += "(" + pdfEscapeString(line) + ") Tj\n";
+      if (i < lines.length - 1) stream += "T*\n";
+    });
+    return stream + "ET";
+  }
+
+  function buildPdf(rawText) {
+    const pages = pdfLayoutPages(rawText);
+    const numPages = pages.length;
+    const objects = [];
+    const catalogObjNum = 1, pagesObjNum = 2, fontObjNum = 3;
+    let nextObjNum = 4;
+    const pageObjNums = [], contentObjNums = [], contentBodies = [];
+
+    for (let p = 0; p < numPages; p++) {
+      contentObjNums.push(nextObjNum++);
+      pageObjNums.push(nextObjNum++);
+      contentBodies.push(pdfContentStream(pages[p]));
+    }
+
+    objects[catalogObjNum] = "<< /Type /Catalog /Pages " + pagesObjNum + " 0 R >>";
+    objects[pagesObjNum] = "<< /Type /Pages /Kids [" + pageObjNums.map((n) => n + " 0 R").join(" ") + "] /Count " + numPages + " >>";
+    objects[fontObjNum] = "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>";
+    for (let p = 0; p < numPages; p++) {
+      const body = contentBodies[p];
+      objects[contentObjNums[p]] = "<< /Length " + body.length + " >>\nstream\n" + body + "\nendstream";
+      objects[pageObjNums[p]] =
+        "<< /Type /Page /Parent " + pagesObjNum + " 0 R /Resources << /Font << /F1 " + fontObjNum + " 0 R >> >> " +
+        "/MediaBox [0 0 " + PDF_PAGE_W + " " + PDF_PAGE_H + "] /Contents " + contentObjNums[p] + " 0 R >>";
+    }
+
+    const totalObjects = nextObjNum - 1;
+    let out = "%PDF-1.4\n";
+    const offsets = new Array(totalObjects + 1).fill(0);
+    for (let n = 1; n <= totalObjects; n++) {
+      offsets[n] = out.length;
+      out += n + " 0 obj\n" + objects[n] + "\nendobj\n";
+    }
+    const xrefOffset = out.length;
+    out += "xref\n0 " + (totalObjects + 1) + "\n0000000000 65535 f \n";
+    for (let n = 1; n <= totalObjects; n++) out += String(offsets[n]).padStart(10, "0") + " 00000 n \n";
+    out += "trailer\n<< /Size " + (totalObjects + 1) + " /Root " + catalogObjNum + " 0 R >>\nstartxref\n" + xrefOffset + "\n%%EOF";
+    return out;
   }
 
   document.getElementById("downloadReportPdf").addEventListener("click", () => {
     if (!lastResult) return;
-    preparePrintView(lastResult);
-
-    // A genuine new top-level tab (window.open) isn't nested inside whatever
-    // sandbox this page is running in, so it's the more likely of the two to
-    // actually be allowed to print. If popups are blocked, opened is
-    // null/undefined and this falls back to printing the current page.
-    let opened = null;
-    try { opened = window.open("", "_blank"); } catch (e) { opened = null; }
-    if (opened && opened.document) {
-      const styleTag = document.querySelector("style").outerHTML;
-      // #printView is display:none outside of @media print in the original
-      // page (it's an inert staging area there); in this new tab it's the
-      // *only* content, so force it visible on screen too — if print() below
-      // doesn't fire for any reason, there's still something to look at
-      // instead of a blank tab, and Ctrl/Cmd+P still works from here.
-      const forceVisible = "<style>#printView{display:block !important;}</style>";
-      opened.document.write("<!doctype html><html><head><title>Pipeline QC Report</title>" + styleTag + forceVisible + "</head><body>" + document.getElementById("printView").outerHTML + "</body></html>");
-      opened.document.close();
-      opened.focus();
-      setTimeout(() => { try { opened.print(); } catch (e) {} }, 300);
-    } else {
-      try { window.print(); } catch (e) {}
-    }
-
-    showReportPreview(
-      "PDF",
-      "A new tab (or the print dialog) should have opened just now — pick “Save as PDF” as the destination. If nothing appeared, this view is likely blocking pop-ups and printing; open webapp/index.html directly in an ordinary browser tab instead, or use the .md/.json download above and print that.",
-      null
-    );
+    const text = reportToMarkdown(buildFullReport(lastResult));
+    downloadBlob("qc_report.pdf", buildPdf(text), "application/pdf");
+    showReportPreview("qc_report.pdf", "A save dialog should have opened just now. If it didn't, this is the report's text content (not the PDF file itself) — copy it below, or use the .md download instead.", text);
   });
 })();
 </script>
