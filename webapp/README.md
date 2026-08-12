@@ -34,18 +34,20 @@ undeclared tables — see "How this maps to the Python pipeline," below.
 
 ## Samples
 
-Three quick-demo buttons load small datasets **embedded directly in the
-page** (no download needed):
+Four quick-demo buttons load datasets **embedded directly in the page** (no
+download needed):
 
 | Button | What it shows |
 |---|---|
 | Clean batch | A well-formed dataset — every stage completes with no findings. |
 | Dirty batch | A handful of common issues (duplicate row, unexpected status) that the pipeline handles and still produces a report for. |
 | Unknown table | `customers`/`orders`/`promotions` plus an undeclared CSV, to show generic profiling in action. |
+| Instruction batch | The *actual* take-home dataset — the same `customers.csv`/`orders.csv`/`promotions.csv` at [`../data/`](../data/), byte-for-byte, ~30K orders — loaded in one click instead of a manual download+upload. Runs the full pipeline at real scale and should reproduce `revenue_analysis.ipynb`'s numbers exactly: total revenue **$16,153,512.87**, net revenue **$15,879,675.40**. This is the one to use to confirm the page isn't just working on toy data. |
 
-Larger, **downloadable** versions of the same three scenarios are in
-[`sample_data/`](sample_data/), for testing the actual upload flow (not just
-the one-click embedded demo):
+The first three are small by design, so their findings are easy to read at a
+glance. Larger, **downloadable** versions of those same three scenarios are
+in [`sample_data/`](sample_data/), for testing the actual upload flow (not
+just the one-click embedded demo):
 
 | Folder | Rows | Designed to trigger |
 |---|---|---|
@@ -53,11 +55,9 @@ the one-click embedded demo):
 | `dirty_batch/` | 6 customers, 35 orders, 4 promotions | Duplicate rows, a **conflicting** duplicate `order_id` (same id, different values — deliberately *not* an exact duplicate), an orphaned `customer_id`, a malformed date, a negative amount, a zero amount, an unrecognized status, and stacked promotions that exceed their order's amount. The conflicting duplicate survives filtering (only *exact* duplicates get auto-dropped — see `README_PIPELINE.md`) and reaches final QC as a hard failure, so **this run halts and withholds the report** — see "What 'blocked' means," below. This is the one sample designed to demonstrate that, not just to show warnings. |
 | `generalization_batch/` | 8 customers, 24 orders, 2 promotions, plus `returns.csv` | An undeclared table (`returns.csv`, referencing `orders.order_id`) with an exact-duplicate row and one orphaned `order_id` — profiled and cleaned generically, at `info` severity, without affecting the revenue numbers at all. |
 
-For a **real-scale** test, upload the actual take-home dataset at
-[`../data/`](../data/) (customers/orders/promotions, ~30K orders) — the
-numbers should come out identical to `revenue_analysis.ipynb` and
-`pipeline/run.py`: total revenue **$16,153,512.87**, net revenue
-**$15,879,675.40**.
+There's no separate `sample_data/instruction_batch/` folder — the Instruction
+batch button embeds `../data/` directly, so that folder already *is* its
+downloadable form.
 
 ## What's in the Report section
 
@@ -166,3 +166,8 @@ sample_data/
   generalization_batch/  clean data + returns.csv, an undeclared table
 README.md              this file
 ```
+
+`index.html` is about 1.5MB — most of that is the Instruction batch sample
+(the full ~30K-row dataset, embedded verbatim so it loads with one click).
+Nothing else in the file is large; the app itself is a few hundred KB of
+HTML/CSS/JS.
